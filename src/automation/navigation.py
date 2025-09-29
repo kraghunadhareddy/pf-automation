@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import logging
 from typing import Optional
-from datetime import datetime, timedelta
 import time
 
 from selenium.webdriver.remote.webdriver import WebDriver
+from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
 
 LOGGER = logging.getLogger(__name__)
 
@@ -134,25 +134,20 @@ def ensure_filter_button_checked(driver: WebDriver, timeout: int = 20) -> None:
         LOGGER.debug("Error while ensuring Filter button checked.", exc_info=True)
 
 
-def _format_aria_label_for_date(d: datetime) -> list[str]:
-    # Common aria-label formats: "September 28, 2025" or without comma
-    month = d.strftime("%B")
-    day = str(d.day)
-    year = str(d.year)
-    return [f"{month} {day}, {year}", f"{month} {day} {year}"]
-
-
 def select_relative_date_in_datepicker(driver: WebDriver, offset_days: int = -1, timeout: int = 30) -> None:
-    """Open the date picker and select date relative to today using offset_days.
+    """Shift the date by clicking the two day-nav buttons adjacent to the date picker.
 
     offset_days: 0=today, -1=yesterday, 1=tomorrow, etc.
-    Tries strategies: data-date, aria-labels, then day-text fallback.
+    Ensures we target the buttons right next to the date picker to avoid other .btn-sm on the page.
     """
+    if offset_days == 0:
+        LOGGER.info("Date shift offset is 0; no action needed.")
+        return
+
     wait = WebDriverWait(driver, timeout)
 
     # Ensure page is idle before interacting
     try:
-        # Reuse idle wait from above by checking common overlays
         for sel in [
             ".spinner-overlay.is-active",
             ".spinner-overlay",
@@ -167,87 +162,185 @@ def select_relative_date_in_datepicker(driver: WebDriver, offset_days: int = -1,
     except Exception:
         pass
 
-    # Ensure we're on the Schedule view by waiting for the date button
     try:
-        btn = wait.until(EC.element_to_be_clickable((By.ID, "date-picker-button")))
-        # Scroll into view and attempt safe click with fallback
+        date_btn = wait.until(EC.presence_of_element_located((By.ID, "date-picker-button")))
         try:
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center', inline: 'center'});", btn)
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center', inline: 'center'});", date_btn)
         except Exception:
             pass
-        try:
-            btn.click()
-        except Exception:
-            # Wait a bit and JS-click as fallback to avoid overlays
+
+        def resolve_adjacent_buttons() -> tuple[Optional[WebElement], Optional[WebElement]]:
+            """Get strictly-adjacent prev/next sibling buttons to the date picker button.
+
+            Prev: preceding-sibling button with classes (btn-sm, border--LRn, rotate-180)
+            Next: following-sibling button with class (btn-sm) and NOT the prev-specific classes.
+            """
+            prev_b = None
+            next_b = None
+            # 0) Prefer container-scoped descendant search within flex-row (handles nested wrappers)
             try:
-                WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.ID, "date-picker-button")))
+                flex_row = date_btn.find_element(
+                    By.XPATH,
+                    "ancestor::div[contains(@class,'item--TBn') and contains(@class,'box-fixed')]//div[contains(@class,'flex-row')][.//button[@id='date-picker-button']][1]",
+                )
+                # Prev: prefer the first following candidate after the date button; else the closest preceding one
+                try:
+                    prev_b = flex_row.find_element(
+                        By.XPATH,
+                        "(.//button[contains(@class,'btn-sm') and contains(@class,'border--LRn') and contains(@class,'rotate-180')][preceding::button[@id='date-picker-button']])[1]",
+                    )
+                except Exception:
+                    try:
+                        prev_b = flex_row.find_element(
+                            By.XPATH,
+                            "(.//button[contains(@class,'btn-sm') and contains(@class,'border--LRn') and contains(@class,'rotate-180')][following::button[@id='date-picker-button']])[last()]",
+                        )
+                    except Exception:
+                        prev_b = None
+                # Next: prefer the first following candidate after the date button; else the closest preceding one
+                try:
+                    next_b = flex_row.find_element(
+                        By.XPATH,
+                        "(.//button[contains(@class,'btn-sm') and not(contains(@class,'border--LRn')) and not(contains(@class,'rotate-180'))][preceding::button[@id='date-picker-button']])[1]",
+                    )
+                except Exception:
+                    try:
+                        next_b = flex_row.find_element(
+                            By.XPATH,
+                            "(.//button[contains(@class,'btn-sm') and not(contains(@class,'border--LRn')) and not(contains(@class,'rotate-180'))][following::button[@id='date-picker-button']])[last()]",
+                        )
+                    except Exception:
+                        next_b = None
+                if prev_b and next_b:
+                    return prev_b, next_b
             except Exception:
                 pass
-            driver.execute_script("arguments[0].click();", btn)
-        LOGGER.info("Opened date picker (id=date-picker-button).")
-    except TimeoutException:
-        LOGGER.warning("Date picker button (id=date-picker-button) not clickable within %ss; skipping.", timeout)
-        return
-    except Exception:
-        LOGGER.warning("Failed to open date picker (id=date-picker-button).", exc_info=True)
-        return
-
-    target = datetime.now() + timedelta(days=offset_days)
-    iso = target.strftime("%Y-%m-%d")
-    aria_labels = _format_aria_label_for_date(target)
-
-    # Wait briefly for the date grid to render
-    try:
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "[data-date], button[aria-label]"))
-        )
-    except Exception:
-        pass
-
-    # Try quick direct matches with small polling and JS-click
-    selectors = [
-        f"[data-date='{iso}']",
-        f"button[aria-label='{aria_labels[0]}']",
-        f"*[aria-label='{aria_labels[0]}']",
-        f"button[aria-label='{aria_labels[1]}']",
-        f"*[aria-label='{aria_labels[1]}']",
-    ]
-
-    # Try for a short window; attempt both attribute-based and day-text fallback each iteration
-    end_time = time.time() + min(timeout, 6)
-    day_text = str(target.day)
-    while time.time() < end_time:
-        for sel in selectors:
+            # 1) Prefer strict adjacency via sibling axis
             try:
-                el = driver.find_element(By.CSS_SELECTOR, sel)
+                prev_b = date_btn.find_element(
+                    By.XPATH,
+                    "preceding-sibling::button[contains(@class,'btn-sm') and contains(@class,'border--LRn') and contains(@class,'rotate-180')][1]",
+                )
             except Exception:
-                el = None
-            if el and el.is_displayed():
-                try:
-                    driver.execute_script("arguments[0].click();", el)
-                    LOGGER.info("Selected date (offset %s) via selector: %s", offset_days, sel)
-                    # After selection, wait for data load
-                    _wait_for_data_load(driver)
-                    return
-                except Exception:
-                    LOGGER.debug("JS click failed for selector %s", sel, exc_info=True)
-        # Try day-text fallback in the same loop for speed
-        try:
-            candidates = driver.find_elements(By.XPATH, f"//*[self::button or self::td or self::div][normalize-space(text())='{day_text}']")
-            for c in candidates:
-                try:
-                    if c.is_displayed() and c.is_enabled():
-                        driver.execute_script("arguments[0].click();", c)
-                        LOGGER.info("Selected date (offset %s) by day text fallback: %s", offset_days, day_text)
-                        _wait_for_data_load(driver)
-                        return
-                except Exception:
-                    continue
-        except Exception:
-            pass
-        time.sleep(0.3)
+                prev_b = None
+            try:
+                next_b = date_btn.find_element(
+                    By.XPATH,
+                    "following-sibling::button[contains(@class,'btn-sm') and not(contains(@class,'border--LRn')) and not(contains(@class,'rotate-180'))][1]",
+                )
+            except Exception:
+                next_b = None
+            if prev_b and next_b:
+                return prev_b, next_b
+            # 2) As a conservative fallback, inspect immediate parent only and pick neighbors around the date_btn
+            try:
+                parent = date_btn.find_element(By.XPATH, "..")
+                children = parent.find_elements(By.XPATH, "./*")
+                # Find index of date_btn among children
+                idx = None
+                for i, c in enumerate(children):
+                    try:
+                        if c.id == date_btn.id:
+                            idx = i
+                            break
+                    except Exception:
+                        continue
+                if idx is not None:
+                    # Helper classifiers
+                    def is_prev_btn(el) -> bool:
+                        try:
+                            cls = (el.get_attribute("class") or "")
+                            return ("btn-sm" in cls) and ("border--LRn" in cls) and ("rotate-180" in cls)
+                        except Exception:
+                            return False
 
-    LOGGER.warning("Failed to select date for offset %s; refine selectors or increase timeout.", offset_days)
+                    def is_next_btn(el) -> bool:
+                        try:
+                            cls = (el.get_attribute("class") or "")
+                            return ("btn-sm" in cls) and ("border--LRn" not in cls) and ("rotate-180" not in cls)
+                        except Exception:
+                            return False
+
+                    # Nearest-neighbor scan: find the closest matching buttons in either direction
+                    n = len(children)
+                    if not prev_b:
+                        try:
+                            for d in range(1, n):
+                                r = idx + d
+                                if r < n and is_prev_btn(children[r]):
+                                    prev_b = children[r]
+                                    break
+                                l = idx - d
+                                if l >= 0 and is_prev_btn(children[l]):
+                                    prev_b = children[l]
+                                    break
+                        except Exception:
+                            pass
+                    if not next_b:
+                        try:
+                            for d in range(1, n):
+                                r = idx + d
+                                if r < n and is_next_btn(children[r]):
+                                    next_b = children[r]
+                                    break
+                                l = idx - d
+                                if l >= 0 and is_next_btn(children[l]):
+                                    next_b = children[l]
+                                    break
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            return prev_b, next_b
+
+        # Validate we can resolve at least the required direction button
+        steps = abs(offset_days)
+        direction = 'next' if offset_days > 0 else 'prev'
+        prev_btn, next_btn = resolve_adjacent_buttons()
+        if offset_days < 0 and not prev_btn:
+            LOGGER.warning("Previous-day button not found strictly adjacent to date picker; cannot shift %s days back.", abs(offset_days))
+            return
+        if offset_days > 0 and not next_btn:
+            LOGGER.warning("Next-day button not found strictly adjacent to date picker; cannot shift %s days forward.", abs(offset_days))
+            return
+
+        LOGGER.info("Date shift | offset=%s | steps=%s | method=adjacent-%s-button", offset_days, steps, direction)
+        last_err = None
+        for i in range(steps):
+            try:
+                # Re-resolve each iteration to avoid stale references after UI refresh
+                prev_btn, next_btn = resolve_adjacent_buttons()
+                target = next_btn if offset_days > 0 else prev_btn
+                if not target:
+                    LOGGER.warning("Step %s/%s: %s-day button not found; stopping.", i + 1, steps, direction)
+                    break
+                # Wait until clickable
+                # Scroll target into view, then attempt click
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center', inline: 'center'});", target)
+                except Exception:
+                    pass
+                try:
+                    target.click()
+                except Exception:
+                    driver.execute_script("arguments[0].click();", target)
+                _wait_for_data_load(driver, timeout=15)
+                time.sleep(0.1)
+            except StaleElementReferenceException as se:
+                last_err = se
+                time.sleep(0.1)
+                continue
+            except Exception as e:
+                last_err = e
+                LOGGER.debug("Step %s/%s: error clicking %s-day button", i + 1, steps, direction, exc_info=True)
+                time.sleep(0.2)
+        if last_err:
+            LOGGER.debug("Date shift completed with last error: %s", repr(last_err))
+        LOGGER.info("Date shift complete | offset=%s | attempted steps=%s", offset_days, steps)
+    except TimeoutException:
+        LOGGER.warning("Date picker button (id=date-picker-button) not present within %ss; skipping date shift.", timeout)
+    except Exception:
+        LOGGER.debug("Error while shifting date by offset.", exc_info=True)
 
 
 def _wait_for_data_load(driver: WebDriver, timeout: int = 30) -> None:
@@ -274,7 +367,7 @@ def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offs
     # After Schedule loads, ensure the Filter toggle is checked
     ensure_filter_button_checked(driver)
 
-    # After Schedule loads, open the date picker and select yesterday
+    # After Schedule loads, shift the date using the adjacent prev/next buttons
     select_relative_date_in_datepicker(driver, offset_days=date_offset_days)
 
     if not url:

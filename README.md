@@ -9,6 +9,7 @@ Automate login to a website using Microsoft Edge (Chromium) with your existing E
 - Selenium 4 with smart waits
  - Optional headless mode (uses a temp profile)
  - Debug artifacts (screenshots/HTML) saved to `.artifacts` on timeouts
+ - Post-login navigation: clicks "Schedule", ensures "Filter" is active, and shifts the date by using the two day-step buttons next to the date picker
 
 ## Prerequisites
 - Windows 10/11
@@ -32,7 +33,7 @@ Edit `config/settings.ini`:
 - `[site]` `url` = login page; `post_login_url` optional
 - `[selectors]` provide selector type and value for username, password, submit, and optional post_login_check
 - `[run]` optional `wait_after_actions_seconds` to pause at the end so you can verify the UI
-	- `date_offset_days` to choose date in the Schedule date picker (0=today, -1=yesterday, 1=tomorrow)
+	- `date_offset_days` shifts the date using the small previous/next buttons adjacent to the date picker button (0=today, -1=yesterday, 1=tomorrow)
 
 Supported selector types: css, xpath, id, name
 
@@ -66,6 +67,7 @@ Useful flags:
 - WebDriver errors: ensure Edge and msedgedriver match; a local driver can be set in `[browser] driver_path`.
 - Element not found: update selectors in `config/settings.ini` to match your site.
 - Profile lock: close running Edge windows or run with `--kill-edge` to unlock.
+ - Date not changing: the automation clicks the left/right small day-step buttons that sit right next to the date picker button. If your UI changed, verify those two buttons are adjacent to `#date-picker-button` and keep their classes (prev has `btn-sm border--LRn rotate-180`).
 
 ## VS Code Tasks
 - Run automation (Headless)
