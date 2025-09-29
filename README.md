@@ -31,6 +31,7 @@ pip install -r requirements.txt
 Edit `config/settings.ini`:
 - `[site]` `url` = login page; `post_login_url` optional
 - `[selectors]` provide selector type and value for username, password, submit, and optional post_login_check
+- `[run]` optional `wait_after_actions_seconds` to pause at the end so you can verify the UI
 
 Supported selector types: css, xpath, id, name
 

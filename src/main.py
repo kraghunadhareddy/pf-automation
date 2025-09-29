@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import os
+import time
 from automation.browser import build_edge_driver, quit_driver, EdgeConfig
 from automation.login import LoginAutomation, LoginSelectors, Selector
 from automation.navigation import navigate_after_login
@@ -88,6 +89,13 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config(Path(args.config))
     base_url = cfg["site"].get("url")
     post_url = cfg["site"].get("post_login_url", fallback=None)
+    # Optional run settings
+    post_actions_wait = 0
+    if cfg.has_section("run"):
+        try:
+            post_actions_wait = cfg["run"].getint("wait_after_actions_seconds", fallback=0)
+        except Exception:
+            post_actions_wait = 0
 
     if not base_url:
         raise SystemExit("Missing 'url' in [site] section of config.")
@@ -144,6 +152,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         LoginAutomation(driver, base_url, selectors).login(args.username, args.password)
         navigate_after_login(driver, post_url)
+        if post_actions_wait and post_actions_wait > 0:
+            logging.getLogger(__name__).info(
+                "Waiting %s seconds after navigation for verification...", post_actions_wait
+            )
+            time.sleep(post_actions_wait)
     except Exception as exc:
         logging.getLogger(__name__).error("Automation failed: %s", exc, exc_info=True)
         return 1
