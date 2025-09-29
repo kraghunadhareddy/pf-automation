@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# VS Code
+.vscode/*.log
+.vscode/*.crash
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project artifacts and logs
+.artifacts/
+log.txt
+
+# Local drivers (use config to point to a local path instead)
+drivers/msedgedriver.exe# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# VS Code
+.vscode/
