@@ -343,6 +343,63 @@ def select_relative_date_in_datepicker(driver: WebDriver, offset_days: int = -1,
         LOGGER.debug("Error while shifting date by offset.", exc_info=True)
 
 
+def print_patient_links_from_table(driver: WebDriver, timeout: int = 15) -> None:
+    """Find and print links that match required pattern after date change.
+
+    Criteria:
+    - Anchor elements must be within table.data-table__grid
+    - href must contain "/PF/charts/patients/"
+    - href path must end with "summary" (ignores query/fragment and trailing slash)
+    """
+    try:
+        WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "table.data-table__grid"))
+        )
+    except TimeoutException:
+        LOGGER.info("table.data-table__grid not found within %ss; skipping patient link print.", timeout)
+        return
+    except Exception:
+        LOGGER.debug("Error locating table.data-table__grid.", exc_info=True)
+        return
+
+    try:
+        anchors = driver.find_elements(By.CSS_SELECTOR, "table.data-table__grid a[href*='/PF/charts/patients/']")
+        from urllib.parse import urlparse, unquote
+        links = []
+        for a in anchors:
+            try:
+                href = a.get_attribute("href") or ""
+                if "/PF/charts/patients/" not in href:
+                    continue
+                # Handle SPA URLs where the app routes live in the fragment after '#'
+                parsed = urlparse(href)
+                path = unquote(parsed.path or "")
+                frag = unquote(parsed.fragment or "")
+
+                def ends_with_summary(s: str) -> bool:
+                    s = s.split("?")[0].rstrip("/")
+                    return s.endswith("summary")
+
+                # Prefer inspecting fragment if it contains the PF route; else fall back to path
+                contains_in_frag = "/PF/charts/patients/" in frag
+                contains_in_path = "/PF/charts/patients/" in path
+                if not (contains_in_frag or contains_in_path):
+                    continue
+
+                candidate = frag if contains_in_frag else path
+                if ends_with_summary(candidate):
+                    links.append(href)
+            except Exception:
+                continue
+        if links:
+            print("\n".join(links))
+            LOGGER.info("Printed %s patient links (ending with 'summary') from table.data-table__grid.", len(links))
+        else:
+            LOGGER.info("No matching patient links (ending with 'summary') found under table.data-table__grid.")
+    except Exception:
+        LOGGER.debug("Error while extracting patient links.", exc_info=True)
+
+
 def _wait_for_data_load(driver: WebDriver, timeout: int = 30) -> None:
     """Wait for common spinners/overlays to disappear after date selection."""
     wait_idle = WebDriverWait(driver, timeout)
@@ -369,6 +426,9 @@ def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offs
 
     # After Schedule loads, shift the date using the adjacent prev/next buttons
     select_relative_date_in_datepicker(driver, offset_days=date_offset_days)
+
+    # After date change, print patient chart links if the table is present
+    print_patient_links_from_table(driver)
 
     if not url:
         LOGGER.info("No post-login URL provided; staying on current page.")
