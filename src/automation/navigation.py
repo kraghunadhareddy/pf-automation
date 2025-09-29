@@ -51,6 +51,89 @@ def click_schedule(driver: WebDriver, timeout: int = 30) -> None:
         LOGGER.warning("Failed to click 'Schedule' (id=ember43).", exc_info=True)
 
 
+def ensure_filter_button_checked(driver: WebDriver, timeout: int = 20) -> None:
+    """Ensure the Filter toggle (data-element="btn-filter-options") has aria-checked="true".
+
+    If not checked, click it (with JS fallback) and wait briefly for the state to update.
+    """
+    wait = WebDriverWait(driver, timeout)
+    try:
+        btn = wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "[data-element='btn-filter-options']"))
+        )
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
+        except Exception:
+            pass
+
+        def is_checked() -> bool:
+            try:
+                return (btn.get_attribute("aria-checked") or "").lower() == "true"
+            except Exception:
+                return False
+
+        # Capture before-state
+        before_aria = (btn.get_attribute("aria-checked") or "").lower()
+        before_cls = btn.get_attribute("class") or ""
+
+        if before_aria == "true":
+            LOGGER.info("Filter | before aria-checked=%s class=%s | action=none | after aria-checked=%s class=%s",
+                        before_aria, before_cls, before_aria, before_cls)
+            return
+
+        # Try to click to enable
+        action = "none"
+        try:
+            clickable = wait.until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-element='btn-filter-options']"))
+            )
+            try:
+                clickable.click()
+                action = "click"
+            except Exception:
+                driver.execute_script("arguments[0].click();", clickable)
+                action = "js-click"
+        except Exception:
+            # Fall back to JS click on the located element
+            try:
+                driver.execute_script("arguments[0].click();", btn)
+                action = "js-click"
+            except Exception:
+                LOGGER.warning("Unable to click Filter button to set checked state.")
+                after_aria = (btn.get_attribute("aria-checked") or "").lower()
+                after_cls = btn.get_attribute("class") or ""
+                LOGGER.info("Filter | before aria-checked=%s class=%s | action=failed | after aria-checked=%s class=%s",
+                            before_aria, before_cls, after_aria, after_cls)
+                return
+
+        # Wait briefly for aria-checked to become true
+        try:
+            WebDriverWait(driver, 8).until(
+                lambda d: (d.find_element(By.CSS_SELECTOR, "[data-element='btn-filter-options']")
+                           .get_attribute("aria-checked") or "").lower() == "true"
+            )
+            # Capture after-state and log summary
+            fresh = driver.find_element(By.CSS_SELECTOR, "[data-element='btn-filter-options']")
+            after_aria = (fresh.get_attribute("aria-checked") or "").lower()
+            after_cls = fresh.get_attribute("class") or ""
+            LOGGER.info("Filter | before aria-checked=%s class=%s | action=%s | after aria-checked=%s class=%s",
+                        before_aria, before_cls, action, after_aria, after_cls)
+        except Exception:
+            # Log what we could observe
+            try:
+                fresh = driver.find_element(By.CSS_SELECTOR, "[data-element='btn-filter-options']")
+                after_aria = (fresh.get_attribute("aria-checked") or "").lower()
+                after_cls = fresh.get_attribute("class") or ""
+            except Exception:
+                after_aria, after_cls = "", ""
+            LOGGER.warning("Filter | before aria-checked=%s class=%s | action=%s | after aria-checked=%s class=%s | note=did-not-confirm-checked",
+                           before_aria, before_cls, action, after_aria, after_cls)
+    except TimeoutException:
+        LOGGER.info("Filter button [data-element='btn-filter-options'] not found; skipping.")
+    except Exception:
+        LOGGER.debug("Error while ensuring Filter button checked.", exc_info=True)
+
+
 def _format_aria_label_for_date(d: datetime) -> list[str]:
     # Common aria-label formats: "September 28, 2025" or without comma
     month = d.strftime("%B")
@@ -187,6 +270,9 @@ def _wait_for_data_load(driver: WebDriver, timeout: int = 30) -> None:
 def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offset_days: int = -1) -> None:
     # Always attempt to click the 'Schedule' item once we believe we're logged in
     click_schedule(driver)
+
+    # After Schedule loads, ensure the Filter toggle is checked
+    ensure_filter_button_checked(driver)
 
     # After Schedule loads, open the date picker and select yesterday
     select_relative_date_in_datepicker(driver, offset_days=date_offset_days)
