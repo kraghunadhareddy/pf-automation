@@ -91,11 +91,16 @@ def main(argv: list[str] | None = None) -> int:
     post_url = cfg["site"].get("post_login_url", fallback=None)
     # Optional run settings
     post_actions_wait = 0
+    date_offset_days = -1
     if cfg.has_section("run"):
         try:
             post_actions_wait = cfg["run"].getint("wait_after_actions_seconds", fallback=0)
         except Exception:
             post_actions_wait = 0
+        try:
+            date_offset_days = cfg["run"].getint("date_offset_days", fallback=-1)
+        except Exception:
+            date_offset_days = -1
 
     if not base_url:
         raise SystemExit("Missing 'url' in [site] section of config.")
@@ -151,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         LoginAutomation(driver, base_url, selectors).login(args.username, args.password)
-        navigate_after_login(driver, post_url)
+        navigate_after_login(driver, post_url, date_offset_days=date_offset_days)
         if post_actions_wait and post_actions_wait > 0:
             logging.getLogger(__name__).info(
                 "Waiting %s seconds after navigation for verification...", post_actions_wait

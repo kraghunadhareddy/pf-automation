@@ -32,6 +32,7 @@ Edit `config/settings.ini`:
 - `[site]` `url` = login page; `post_login_url` optional
 - `[selectors]` provide selector type and value for username, password, submit, and optional post_login_check
 - `[run]` optional `wait_after_actions_seconds` to pause at the end so you can verify the UI
+	- `date_offset_days` to choose date in the Schedule date picker (0=today, -1=yesterday, 1=tomorrow)
 
 Supported selector types: css, xpath, id, name
 

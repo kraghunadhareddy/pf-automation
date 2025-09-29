@@ -59,13 +59,11 @@ def _format_aria_label_for_date(d: datetime) -> list[str]:
     return [f"{month} {day}, {year}", f"{month} {day} {year}"]
 
 
-def select_yesterday_in_datepicker(driver: WebDriver, timeout: int = 30) -> None:
-    """Open the date picker (id='date-picker-button') and select yesterday's date.
+def select_relative_date_in_datepicker(driver: WebDriver, offset_days: int = -1, timeout: int = 30) -> None:
+    """Open the date picker and select date relative to today using offset_days.
 
-    Tries multiple selector strategies to match common date pickers:
-    - [data-date="YYYY-MM-DD"]
-    - [aria-label="Month D, YYYY"] (and without comma)
-    - A visible day cell/button with text = D (fallback)
+    offset_days: 0=today, -1=yesterday, 1=tomorrow, etc.
+    Tries strategies: data-date, aria-labels, then day-text fallback.
     """
     wait = WebDriverWait(driver, timeout)
 
@@ -111,7 +109,7 @@ def select_yesterday_in_datepicker(driver: WebDriver, timeout: int = 30) -> None
         LOGGER.warning("Failed to open date picker (id=date-picker-button).", exc_info=True)
         return
 
-    target = datetime.now() - timedelta(days=1)
+    target = datetime.now() + timedelta(days=offset_days)
     iso = target.strftime("%Y-%m-%d")
     aria_labels = _format_aria_label_for_date(target)
 
@@ -144,7 +142,7 @@ def select_yesterday_in_datepicker(driver: WebDriver, timeout: int = 30) -> None
             if el and el.is_displayed():
                 try:
                     driver.execute_script("arguments[0].click();", el)
-                    LOGGER.info("Selected yesterday via selector: %s", sel)
+                    LOGGER.info("Selected date (offset %s) via selector: %s", offset_days, sel)
                     # After selection, wait for data load
                     _wait_for_data_load(driver)
                     return
@@ -157,7 +155,7 @@ def select_yesterday_in_datepicker(driver: WebDriver, timeout: int = 30) -> None
                 try:
                     if c.is_displayed() and c.is_enabled():
                         driver.execute_script("arguments[0].click();", c)
-                        LOGGER.info("Selected yesterday by day text fallback: %s", day_text)
+                        LOGGER.info("Selected date (offset %s) by day text fallback: %s", offset_days, day_text)
                         _wait_for_data_load(driver)
                         return
                 except Exception:
@@ -166,7 +164,7 @@ def select_yesterday_in_datepicker(driver: WebDriver, timeout: int = 30) -> None
             pass
         time.sleep(0.3)
 
-    LOGGER.warning("Failed to quickly select yesterday; consider refining selectors or increasing timeout.")
+    LOGGER.warning("Failed to select date for offset %s; refine selectors or increase timeout.", offset_days)
 
 
 def _wait_for_data_load(driver: WebDriver, timeout: int = 30) -> None:
@@ -186,12 +184,12 @@ def _wait_for_data_load(driver: WebDriver, timeout: int = 30) -> None:
             pass
 
 
-def navigate_after_login(driver: WebDriver, url: Optional[str] = None) -> None:
+def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offset_days: int = -1) -> None:
     # Always attempt to click the 'Schedule' item once we believe we're logged in
     click_schedule(driver)
 
     # After Schedule loads, open the date picker and select yesterday
-    select_yesterday_in_datepicker(driver)
+    select_relative_date_in_datepicker(driver, offset_days=date_offset_days)
 
     if not url:
         LOGGER.info("No post-login URL provided; staying on current page.")
