@@ -6,6 +6,7 @@ import time
 import os
 import shutil
 from pathlib import Path
+from automation.extraction import run_intake_extractor
 
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
@@ -463,8 +464,14 @@ def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offs
                 if clicked:
                     LOGGER.info("Clicked first 'intake' document-type link.")
                     try:
-                        if _download_intake_document_if_available(driver, timeout=15, staging_dir=staging_dir, patient_id=patient_id):
-                            LOGGER.info("Triggered download via [data-element='download-doc-btn'].")
+                        dest_pdf = _download_intake_document_if_available(driver, timeout=15, staging_dir=staging_dir, patient_id=patient_id)
+                        if dest_pdf:
+                            LOGGER.info("Downloaded and moved intake PDF to: %s", dest_pdf)
+                            # Run extractor to produce <patientId>-intake-details.json and log
+                            if patient_id and staging_dir:
+                                output_json = staging_dir / f"{patient_id}-intake-details.json"
+                                log_file = staging_dir / f"{patient_id}-intake-log.txt"
+                                run_intake_extractor(dest_pdf, output_json, log_file)
                         else:
                             LOGGER.info("Download button [data-element='download-doc-btn'] not found or not clickable.")
                     except Exception:
@@ -481,8 +488,13 @@ def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offs
                         if clicked2:
                             LOGGER.info("Clicked first 'intake' document-type link in signed documents view.")
                             try:
-                                if _download_intake_document_if_available(driver, timeout=15, staging_dir=staging_dir, patient_id=patient_id):
-                                    LOGGER.info("Triggered download via [data-element='download-doc-btn'] (signed view).")
+                                dest_pdf2 = _download_intake_document_if_available(driver, timeout=15, staging_dir=staging_dir, patient_id=patient_id)
+                                if dest_pdf2:
+                                    LOGGER.info("Downloaded and moved intake PDF to (signed view): %s", dest_pdf2)
+                                    if patient_id and staging_dir:
+                                        output_json2 = staging_dir / f"{patient_id}-intake-details.json"
+                                        log_file2 = staging_dir / f"{patient_id}-intake-log.txt"
+                                        run_intake_extractor(dest_pdf2, output_json2, log_file2)
                                 else:
                                     LOGGER.info("Download button not found/clickable in signed documents view.")
                             except Exception:
@@ -610,7 +622,7 @@ def _click_first_intake_document_type(driver: WebDriver, timeout: int = 20) -> b
     return True
 
 
-def _download_intake_document_if_available(driver: WebDriver, timeout: int = 15, staging_dir: Optional[Path] = None, patient_id: Optional[str] = None) -> bool:
+def _download_intake_document_if_available(driver: WebDriver, timeout: int = 15, staging_dir: Optional[Path] = None, patient_id: Optional[str] = None) -> Optional[Path]:
     """Click the download button for the intake document if present.
 
     Looks for [data-element='download-doc-btn'] and attempts to click it. Returns True if a click was triggered.
@@ -619,7 +631,7 @@ def _download_intake_document_if_available(driver: WebDriver, timeout: int = 15,
     try:
         btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-element='download-doc-btn']")))
     except TimeoutException:
-        return False
+        return None
     # Clean Downloads of old intake*.pdf files before triggering a new download
     downloads_dir = _get_downloads_dir()
     try:
@@ -646,9 +658,10 @@ def _download_intake_document_if_available(driver: WebDriver, timeout: int = 15,
             dest = _unique_destination(staging_dir, target_name)
             shutil.move(str(downloaded), str(dest))
             LOGGER.info("Moved downloaded file to staging: %s", dest)
+            return dest
     except Exception:
         LOGGER.debug("Error while waiting/moving downloaded intake file.", exc_info=True)
-    return True
+    return None
 
 
 def _get_downloads_dir() -> Path:
@@ -735,3 +748,6 @@ def _safe_patient_filename(patient_id: str) -> str:
     if not pid:
         return "intake.pdf"
     return f"{pid}.pdf"
+
+
+# Extraction logic has been moved to automation.extraction.run_intake_extractor
