@@ -5,6 +5,7 @@ import configparser
 import logging
 import sys
 from pathlib import Path
+from datetime import datetime
 
 import os
 import time
@@ -156,7 +157,23 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         LoginAutomation(driver, base_url, selectors).login(args.username, args.password)
-        navigate_after_login(driver, post_url, date_offset_days=date_offset_days)
+
+        # Prepare Processing/<timestamp>/staging and processed, anchored at repo root
+        script_dir = Path(__file__).resolve().parent
+        repo_root = script_dir.parent
+        processing_root = repo_root / "Processing"
+        ts = datetime.now().strftime("%Y%m%d-%H%M")
+        run_dir = processing_root / ts
+        staging_dir = run_dir / "staging"
+        processed_dir = run_dir / "processed"
+        try:
+            staging_dir.mkdir(parents=True, exist_ok=True)
+            processed_dir.mkdir(parents=True, exist_ok=True)
+            logging.getLogger(__name__).info("Processing run directory: %s", run_dir)
+        except Exception:
+            logging.getLogger(__name__).warning("Unable to create Processing directories at %s", run_dir, exc_info=True)
+
+        navigate_after_login(driver, post_url, date_offset_days=date_offset_days, staging_dir=staging_dir)
         if post_actions_wait and post_actions_wait > 0:
             logging.getLogger(__name__).info(
                 "Waiting %s seconds after navigation for verification...", post_actions_wait

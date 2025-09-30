@@ -3,6 +3,9 @@ from __future__ import annotations
 import logging
 from typing import Optional
 import time
+import os
+import shutil
+from pathlib import Path
 
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
@@ -346,8 +349,9 @@ def select_relative_date_in_datepicker(driver: WebDriver, offset_days: int = -1,
 def print_patient_links_from_table(driver: WebDriver, timeout: int = 15) -> list[str]:
     """Collect links that match required pattern after date change and return them.
 
-    Criteria:
-    - Anchor elements must be within table.data-table__grid
+            try:
+                # Use a short timeout on pendingdocuments so we can fall back quickly
+                clicked = _click_first_intake_document_type(driver, timeout=4)
     - href must contain "/PF/charts/patients/"
     - route must end with "summary" (supports SPA hash routes; ignores query and trailing slash)
 
@@ -425,7 +429,7 @@ def _wait_for_data_load(driver: WebDriver, timeout: int = 30) -> None:
             pass
 
 
-def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offset_days: int = -1) -> None:
+def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offset_days: int = -1, staging_dir: Optional[Path] = None) -> None:
     # Always attempt to click the 'Schedule' item once we believe we're logged in
     click_schedule(driver)
 
@@ -446,8 +450,50 @@ def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offs
     # Loop through the collected links, opening each in the same browser window and pausing 5 seconds
     for idx, href in enumerate(links, start=1):
         try:
-            LOGGER.info("[%s/%s] Opening patient link: %s", idx, len(links), href)
-            driver.get(href)
+            patient_id = _extract_patient_id(href)
+            # Build timeline URL (pending documents) from summary URL before opening
+            timeline_href = _to_timeline_url(href)
+            LOGGER.info("[%s/%s] Opening patient timeline link: %s", idx, len(links), timeline_href)
+            driver.get(timeline_href)
+            _wait_for_data_load(driver, timeout=30)
+
+            # Click the first occurrence of an 'intake' document-type entry if present
+            try:
+                clicked = _click_first_intake_document_type(driver, timeout=4)
+                if clicked:
+                    LOGGER.info("Clicked first 'intake' document-type link.")
+                    try:
+                        if _download_intake_document_if_available(driver, timeout=15, staging_dir=staging_dir, patient_id=patient_id):
+                            LOGGER.info("Triggered download via [data-element='download-doc-btn'].")
+                        else:
+                            LOGGER.info("Download button [data-element='download-doc-btn'] not found or not clickable.")
+                    except Exception:
+                        LOGGER.debug("Error attempting to click download button.", exc_info=True)
+                else:
+                    LOGGER.info("No 'intake' document-type link found in pending documents; trying signed documents view.")
+                    # Fallback: try the signed documents timeline
+                    signed_href = _to_timeline_url_with_view(href, 'signeddocuments')
+                    LOGGER.info("Opening patient signed documents timeline link: %s", signed_href)
+                    driver.get(signed_href)
+                    _wait_for_data_load(driver, timeout=30)
+                    try:
+                        clicked2 = _click_first_intake_document_type(driver, timeout=20)
+                        if clicked2:
+                            LOGGER.info("Clicked first 'intake' document-type link in signed documents view.")
+                            try:
+                                if _download_intake_document_if_available(driver, timeout=15, staging_dir=staging_dir, patient_id=patient_id):
+                                    LOGGER.info("Triggered download via [data-element='download-doc-btn'] (signed view).")
+                                else:
+                                    LOGGER.info("Download button not found/clickable in signed documents view.")
+                            except Exception:
+                                LOGGER.debug("Error attempting to click download button in signed documents view.", exc_info=True)
+                        else:
+                            LOGGER.info("No 'intake' document-type link found in signed documents view either.")
+                    except Exception:
+                        LOGGER.debug("Error while attempting to click 'intake' in signed documents view.", exc_info=True)
+            except Exception:
+                LOGGER.debug("Error while attempting to click 'intake' document-type link.", exc_info=True)
+
             time.sleep(5)
         except Exception:
             LOGGER.debug("Error opening patient link: %s", href, exc_info=True)
@@ -457,3 +503,235 @@ def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offs
         return
     LOGGER.info("Navigating to %s", url)
     driver.get(url)
+
+
+def _to_timeline_url(href: str) -> str:
+    """Convert a patient 'summary' route to 'timeline/pendingdocuments' while preserving query/fragment structure."""
+    return _to_timeline_url_with_view(href, 'pendingdocuments')
+
+
+def _to_timeline_url_with_view(href: str, view: str) -> str:
+    """Convert a patient 'summary' route to 'timeline/<view>' while preserving query/fragment structure.
+
+    Supports SPA hash routes where the PF route is in the fragment and standard path routes.
+    """
+    try:
+        from urllib.parse import urlparse, urlunparse, unquote, quote
+        parsed = urlparse(href)
+        frag = unquote(parsed.fragment or "")
+        path = unquote(parsed.path or "")
+
+        def replace_trailing_summary(s: str) -> str:
+            s_main, sep, q = s.partition("?")
+            s_main = s_main.rstrip("/")
+            if s_main.endswith("summary"):
+                s_main = s_main[: -len("summary")] + f"timeline/{view}"
+            return s_main + (sep + q if sep else "")
+
+        if "/PF/charts/patients/" in frag:
+            new_frag = replace_trailing_summary(frag)
+            return urlunparse(parsed._replace(fragment=quote(new_frag, safe="/:?=&")))
+        if "/PF/charts/patients/" in path:
+            new_path = replace_trailing_summary(path)
+            return urlunparse(parsed._replace(path=quote(new_path, safe="/:?=&")))
+        # Fallback: naive string replace at end
+        if href.rstrip("/").endswith("summary"):
+            return href[: -len("summary")] + f"timeline/{view}"
+    except Exception:
+        pass
+    return href
+
+
+def _print_if_intake_in_timeline_events(driver: WebDriver, timeout: int = 20) -> bool:
+    """Scan the timeline events table for 'intake' in the second column; if present,
+    print the hyperlink from the first column of that row to the console.
+
+    Returns True if an 'intake' row is found (and hyperlink printed when available); else False.
+    """
+    wait = WebDriverWait(driver, timeout)
+    table = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-element='timeline-events-table']")))
+    try:
+        rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
+        for r in rows:
+            cells = r.find_elements(By.CSS_SELECTOR, "td")
+            if len(cells) >= 2:
+                txt = (cells[1].text or "").strip().lower()
+                if "intake" in txt:
+                    # Try to extract hyperlink from the first column of this row
+                    href_printed = False
+                    try:
+                        link_el = cells[0].find_element(By.CSS_SELECTOR, "a[href]")
+                        href = link_el.get_attribute("href") or ""
+                        if href:
+                            print(href)
+                            href_printed = True
+                    except Exception:
+                        LOGGER.debug("No hyperlink found in first column of the 'intake' row.", exc_info=True)
+                    if not href_printed:
+                        print("Found 'intake' in timeline events (second column), but no hyperlink in first column.")
+                    return True
+    except Exception:
+        LOGGER.debug("Error while scanning timeline events table rows.", exc_info=True)
+    return False
+
+
+def _click_first_intake_document_type(driver: WebDriver, timeout: int = 20) -> bool:
+    """Within timeline events table, find the first element with
+    data-element="document-type" and classes "text-color-link text-truncate"
+    whose text contains 'intake' (case-insensitive), then click it.
+
+    Returns True if clicked; else False.
+    """
+    wait = WebDriverWait(driver, timeout)
+    # Ensure table exists
+    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-element='timeline-events-table']")))
+    # XPath to find first matching element inside the table
+    intake_xpath = (
+        "//*[@data-element='timeline-events-table']"
+        "//*[ @data-element='document-type'"
+        " and contains(concat(' ', normalize-space(@class), ' '), ' text-color-link ')"
+        " and contains(concat(' ', normalize-space(@class), ' '), ' text-truncate ')"
+        " and contains(translate(normalize-space(string(.)), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'intake')"
+        "][1]"
+    )
+    try:
+        el = wait.until(EC.element_to_be_clickable((By.XPATH, intake_xpath)))
+    except TimeoutException:
+        return False
+    try:
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+    except Exception:
+        pass
+    try:
+        el.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", el)
+    _wait_for_data_load(driver, timeout=30)
+    return True
+
+
+def _download_intake_document_if_available(driver: WebDriver, timeout: int = 15, staging_dir: Optional[Path] = None, patient_id: Optional[str] = None) -> bool:
+    """Click the download button for the intake document if present.
+
+    Looks for [data-element='download-doc-btn'] and attempts to click it. Returns True if a click was triggered.
+    """
+    wait = WebDriverWait(driver, timeout)
+    try:
+        btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-element='download-doc-btn']")))
+    except TimeoutException:
+        return False
+    # Clean Downloads of old intake*.pdf files before triggering a new download
+    downloads_dir = _get_downloads_dir()
+    try:
+        _cleanup_old_intake_pdfs(downloads_dir)
+    except Exception:
+        LOGGER.debug("Failed to clean up old intake PDFs in Downloads.", exc_info=True)
+    try:
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
+    except Exception:
+        pass
+    try:
+        btn.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", btn)
+    # Wait for the download to complete and move it to staging if provided
+    try:
+        downloaded = _wait_for_intake_pdf(downloads_dir, max_wait=40)
+        if downloaded and staging_dir:
+            try:
+                staging_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            target_name = _safe_patient_filename(patient_id) if patient_id else downloaded.name
+            dest = _unique_destination(staging_dir, target_name)
+            shutil.move(str(downloaded), str(dest))
+            LOGGER.info("Moved downloaded file to staging: %s", dest)
+    except Exception:
+        LOGGER.debug("Error while waiting/moving downloaded intake file.", exc_info=True)
+    return True
+
+
+def _get_downloads_dir() -> Path:
+    # Default to user's Downloads directory
+    home = Path(os.path.expanduser("~"))
+    downloads = home / "Downloads"
+    return downloads
+
+
+def _cleanup_old_intake_pdfs(downloads_dir: Path) -> None:
+    if not downloads_dir.exists():
+        return
+    for p in downloads_dir.glob("*"):
+        name = p.name.lower()
+        if name.startswith("intake") and name.endswith(".pdf"):
+            try:
+                p.unlink(missing_ok=True)
+            except Exception:
+                continue
+
+
+def _wait_for_intake_pdf(downloads_dir: Path, max_wait: int = 40) -> Optional[Path]:
+    """Wait until an intake*.pdf appears in Downloads (and is not a temp .crdownload)."""
+    end = time.time() + max_wait
+    candidate: Optional[Path] = None
+    while time.time() < end:
+        pdfs = [p for p in downloads_dir.glob("*.pdf") if p.name.lower().startswith("intake")]
+        if pdfs:
+            # Ensure no .crdownload temp for this file
+            candidate = sorted(pdfs, key=lambda x: x.stat().st_mtime, reverse=True)[0]
+            crdl = candidate.with_suffix(candidate.suffix + ".crdownload")
+            if not crdl.exists():
+                return candidate
+        time.sleep(0.5)
+    return candidate
+
+
+def _unique_destination(folder: Path, filename: str) -> Path:
+    dest = folder / filename
+    if not dest.exists():
+        return dest
+    stem = dest.stem
+    suffix = dest.suffix
+    i = 1
+    while True:
+        cand = folder / f"{stem}({i}){suffix}"
+        if not cand.exists():
+            return cand
+        i += 1
+
+
+def _extract_patient_id(href: str) -> Optional[str]:
+    """Extract the patient identifier from a PF charts URL.
+
+    Supports URLs where the PF route is in the fragment (after #) or in the path.
+    Returns the segment after '/PF/charts/patients/' up to the next '/'.
+    """
+    try:
+        from urllib.parse import urlparse, unquote
+        parsed = urlparse(href)
+        frag = unquote(parsed.fragment or "")
+        path = unquote(parsed.path or "")
+        source = frag if "/PF/charts/patients/" in frag else path
+        marker = "/PF/charts/patients/"
+        if marker in source:
+            after = source.split(marker, 1)[1]
+            # after could be like '<id>/summary' or '<id>'
+            parts = [p for p in after.split("/") if p]
+            if parts:
+                # Basic sanitize: allow alphanum, dash
+                import re
+                pid = parts[0]
+                pid = re.sub(r"[^A-Za-z0-9\-]", "", pid)
+                return pid or None
+    except Exception:
+        pass
+    return None
+
+
+def _safe_patient_filename(patient_id: str) -> str:
+    """Return a safe file name '<patient_id>.pdf' using a conservative charset."""
+    import re
+    pid = re.sub(r"[^A-Za-z0-9\-]", "", patient_id or "")
+    if not pid:
+        return "intake.pdf"
+    return f"{pid}.pdf"

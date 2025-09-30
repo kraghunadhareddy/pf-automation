@@ -1,4 +1,8 @@
-# Python
+## Ignore processing artifacts
+Processing/
+config/Processing/
+
+## Python
 __pycache__/
 *.py[cod]
 *.pyo
@@ -10,29 +14,24 @@ build/
 .eggs/
 pip-wheel-metadata/
 
-# Virtual environments
+## Virtual environments
 .venv/
 venv/
 env/
+.env
 
-# VS Code
+## VS Code
+.vscode/
 .vscode/*.log
 .vscode/*.crash
 
-# OS
+## OS
 .DS_Store
 Thumbs.db
 
-# Project artifacts and logs
+## Project artifacts and logs
 .artifacts/
 log.txt
 
-# Local drivers (use config to point to a local path instead)
-drivers/msedgedriver.exe# Python
-__pycache__/
-*.pyc
-.venv/
-.env
-
-# VS Code
-.vscode/
+## Local drivers (use config to point to a local path instead)
+drivers/msedgedriver.exe
