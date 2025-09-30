@@ -343,29 +343,31 @@ def select_relative_date_in_datepicker(driver: WebDriver, offset_days: int = -1,
         LOGGER.debug("Error while shifting date by offset.", exc_info=True)
 
 
-def print_patient_links_from_table(driver: WebDriver, timeout: int = 15) -> None:
-    """Find and print links that match required pattern after date change.
+def print_patient_links_from_table(driver: WebDriver, timeout: int = 15) -> list[str]:
+    """Collect links that match required pattern after date change and return them.
 
     Criteria:
     - Anchor elements must be within table.data-table__grid
     - href must contain "/PF/charts/patients/"
-    - href path must end with "summary" (ignores query/fragment and trailing slash)
+    - route must end with "summary" (supports SPA hash routes; ignores query and trailing slash)
+
+    Returns: a list of matching href strings (may be empty on no matches or failure)
     """
     try:
         WebDriverWait(driver, timeout).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "table.data-table__grid"))
         )
     except TimeoutException:
-        LOGGER.info("table.data-table__grid not found within %ss; skipping patient link print.", timeout)
-        return
+        LOGGER.info("table.data-table__grid not found within %ss; skipping patient link collection.", timeout)
+        return []
     except Exception:
         LOGGER.debug("Error locating table.data-table__grid.", exc_info=True)
-        return
+        return []
 
     try:
         anchors = driver.find_elements(By.CSS_SELECTOR, "table.data-table__grid a[href*='/PF/charts/patients/']")
         from urllib.parse import urlparse, unquote
-        links = []
+        links: list[str] = []
         for a in anchors:
             try:
                 href = a.get_attribute("href") or ""
@@ -391,13 +393,19 @@ def print_patient_links_from_table(driver: WebDriver, timeout: int = 15) -> None
                     links.append(href)
             except Exception:
                 continue
-        if links:
-            print("\n".join(links))
-            LOGGER.info("Printed %s patient links (ending with 'summary') from table.data-table__grid.", len(links))
-        else:
+        # De-duplicate while preserving order
+        seen = set()
+        ordered_unique = []
+        for href in links:
+            if href not in seen:
+                seen.add(href)
+                ordered_unique.append(href)
+        if not ordered_unique:
             LOGGER.info("No matching patient links (ending with 'summary') found under table.data-table__grid.")
+        return ordered_unique
     except Exception:
         LOGGER.debug("Error while extracting patient links.", exc_info=True)
+        return []
 
 
 def _wait_for_data_load(driver: WebDriver, timeout: int = 30) -> None:
@@ -427,8 +435,22 @@ def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offs
     # After Schedule loads, shift the date using the adjacent prev/next buttons
     select_relative_date_in_datepicker(driver, offset_days=date_offset_days)
 
-    # After date change, print patient chart links if the table is present
-    print_patient_links_from_table(driver)
+    # After date change, collect patient chart links and print them
+    links = print_patient_links_from_table(driver)
+    if links:
+        print("\n".join(links))
+        LOGGER.info("Collected %s patient links; beginning per-link navigation.", len(links))
+    else:
+        LOGGER.info("No patient links collected; skipping per-link navigation.")
+
+    # Loop through the collected links, opening each in the same browser window and pausing 5 seconds
+    for idx, href in enumerate(links, start=1):
+        try:
+            LOGGER.info("[%s/%s] Opening patient link: %s", idx, len(links), href)
+            driver.get(href)
+            time.sleep(5)
+        except Exception:
+            LOGGER.debug("Error opening patient link: %s", href, exc_info=True)
 
     if not url:
         LOGGER.info("No post-login URL provided; staying on current page.")
