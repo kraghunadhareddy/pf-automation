@@ -506,7 +506,17 @@ def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offs
             except Exception:
                 LOGGER.debug("Error while attempting to click 'intake' document-type link.", exc_info=True)
 
-            time.sleep(5)
+            # After processing (whether or not an intake PDF was found), return to the original summary page
+            try:
+                if href:
+                    LOGGER.info("Returning to patient summary page: %s", href)
+                    driver.get(href)
+                    _wait_for_data_load(driver, timeout=30)
+                    time.sleep(5)  # allow page to settle / optional human-visible pause
+                else:
+                    time.sleep(5)
+            except Exception:
+                LOGGER.debug("Failed to return to summary page for %s; continuing.", href, exc_info=True)
         except Exception:
             LOGGER.debug("Error opening patient link: %s", href, exc_info=True)
 
