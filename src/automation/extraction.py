@@ -5,6 +5,17 @@ import sys
 import contextlib
 
 
+import logging
+LOGGER = logging.getLogger(__name__)
+
+try:
+    from pdf2image import convert_from_path
+    # ...other imports and extractor setup...
+except ImportError as e:
+    LOGGER.error("Failed to import 'pdf2image' for PDF extraction: %s", e)
+    LOGGER.error("Please install the missing dependency with: pip install pdf2image")
+    raise
+
 def run_intake_extractor(
     pdf_path: Path,
     output_json: Path,
