@@ -1,5 +1,223 @@
+def _populate_family_history(driver, summary_text, timeout=15) -> bool:
+    return populate_section_generic(driver, summary_text, "family_history", timeout)
+
+def _populate_social_history(driver, summary_text, timeout=15) -> bool:
+    return populate_section_generic(driver, summary_text, "social_history", timeout)
+
+def _populate_major_events(driver, summary_text, timeout=15) -> bool:
+    return populate_section_generic(driver, summary_text, "major_events", timeout)
+
+def _populate_ongoing_medical_problems(driver, summary_text, timeout=15) -> bool:
+    return populate_section_generic(driver, summary_text, "ongoing_medical_problems", timeout)
+
+def _build_family_history_summary(intake_json):
+    import json
+    import sys
+    print(f"[DEBUG] intake_json type: {type(intake_json)}, value: {intake_json}")
+    sys.stdout.flush()
+    try:
+        if isinstance(intake_json, str) or isinstance(intake_json, Path):
+            with open(intake_json, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = intake_json
+    except Exception as e:
+        print(f"[DEBUG] Error loading intake_json: {e}")
+        sys.stdout.flush()
+        return "No family history found."
+
+    # Print all section names for debugging
+    section_names = []
+    for page in data.get("pages", []):
+        for section in page.get("sections", []):
+            section_names.append(section.get("section", "<no section key>"))
+        for resp in page.get("responses", []):
+            section_names.append(resp.get("section", "<no section key>"))
+    print(f"[DEBUG] All section names found: {section_names}")
+    sys.stdout.flush()
+
+    family_sections = []
+    # Search for FAMILY HISTORY in both sections and responses
+    for page in data.get("pages", []):
+        for section in page.get("sections", []):
+            if section.get("section", "").strip().upper() == "FAMILY HISTORY":
+                family_sections.append(section)
+        for resp in page.get("responses", []):
+            if resp.get("section", "").strip().upper() == "FAMILY HISTORY":
+                family_sections.append(resp)
+
+    if not family_sections:
+        return "No family history found."
+
+    print(f"[DEBUG] Raw family_sections: {family_sections}")
+    sys.stdout.flush()
+    lines = []
+    for section in family_sections:
+        for q in section.get("questions", []):
+            question = q.get("question", "")
+            answer = q.get("answer")
+            if answer is not None and str(answer).strip():
+                lines.append(f"{question}: {answer}")
+    print(f"[DEBUG] Extracted family history lines: {lines}")
+    sys.stdout.flush()
+    return "\n".join(lines) if lines else "No family history details available."
+
+def _build_social_history_summary(intake_json):
+    import sys
+    from pathlib import Path
+    import json
+    print(f"[DEBUG] intake_json type: {type(intake_json)}, value: {intake_json}")
+    sys.stdout.flush()
+    try:
+        if isinstance(intake_json, str) or isinstance(intake_json, Path):
+            with open(intake_json, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = intake_json
+    except Exception as e:
+        print(f"[DEBUG] Error loading intake_json: {e}")
+        sys.stdout.flush()
+        return "No social history found."
+
+    section_names = []
+    for page in data.get("pages", []):
+        for section in page.get("sections", []):
+            section_names.append(section.get("section", "<no section key>"))
+        for resp in page.get("responses", []):
+            section_names.append(resp.get("section", "<no section key>"))
+    print(f"[DEBUG] All section names found: {section_names}")
+    sys.stdout.flush()
+
+    social_sections = []
+    for page in data.get("pages", []):
+        for section in page.get("sections", []):
+            if section.get("section", "").strip().upper() == "SOCIAL HISTORY":
+                social_sections.append(section)
+        for resp in page.get("responses", []):
+            if resp.get("section", "").strip().upper() == "SOCIAL HISTORY":
+                social_sections.append(resp)
+
+    if not social_sections:
+        return "No social history found."
+
+    print(f"[DEBUG] Raw social_sections: {social_sections}")
+    sys.stdout.flush()
+    lines = []
+    for section in social_sections:
+        for q in section.get("questions", []):
+            question = q.get("question", "")
+            answer = q.get("answer")
+            if answer is not None and str(answer).strip():
+                lines.append(f"{question}: {answer}")
+    print(f"[DEBUG] Extracted social history lines: {lines}")
+    sys.stdout.flush()
+    return "\n".join(lines) if lines else "No social history details available."
+
+def _build_major_events_summary(intake_json):
+    import sys
+    from pathlib import Path
+    import json
+    print(f"[DEBUG] intake_json type: {type(intake_json)}, value: {intake_json}")
+    sys.stdout.flush()
+    try:
+        if isinstance(intake_json, str) or isinstance(intake_json, Path):
+            with open(intake_json, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = intake_json
+    except Exception as e:
+        print(f"[DEBUG] Error loading intake_json: {e}")
+        sys.stdout.flush()
+        return "No major events found."
+
+    section_names = []
+    for page in data.get("pages", []):
+        for section in page.get("sections", []):
+            section_names.append(section.get("section", "<no section key>"))
+        for resp in page.get("responses", []):
+            section_names.append(resp.get("section", "<no section key>"))
+    print(f"[DEBUG] All section names found: {section_names}")
+    sys.stdout.flush()
+
+    major_sections = []
+    for page in data.get("pages", []):
+        for section in page.get("sections", []):
+            if section.get("section", "").strip().upper() == "SURGERIES/MAJOR EVENTS":
+                major_sections.append(section)
+        for resp in page.get("responses", []):
+            if resp.get("section", "").strip().upper() == "SURGERIES/MAJOR EVENTS":
+                major_sections.append(resp)
+
+    if not major_sections:
+        return "No major events found."
+
+    print(f"[DEBUG] Raw major_sections: {major_sections}")
+    sys.stdout.flush()
+    lines = []
+    for section in major_sections:
+        for q in section.get("questions", []):
+            question = q.get("question", "")
+            answer = q.get("answer")
+            if answer is not None and str(answer).strip():
+                lines.append(f"{question}: {answer}")
+    print(f"[DEBUG] Extracted major events lines: {lines}")
+    sys.stdout.flush()
+    return "\n".join(lines) if lines else "No major events details available."
+
+def _build_ongoing_medical_problems_summary(intake_json):
+    import sys
+    from pathlib import Path
+    import json
+    print(f"[DEBUG] intake_json type: {type(intake_json)}, value: {intake_json}")
+    sys.stdout.flush()
+    try:
+        if isinstance(intake_json, str) or isinstance(intake_json, Path):
+            with open(intake_json, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = intake_json
+    except Exception as e:
+        print(f"[DEBUG] Error loading intake_json: {e}")
+        sys.stdout.flush()
+        return "No ongoing medical problems found."
+
+    section_names = []
+    for page in data.get("pages", []):
+        for section in page.get("sections", []):
+            section_names.append(section.get("section", "<no section key>"))
+        for resp in page.get("responses", []):
+            section_names.append(resp.get("section", "<no section key>"))
+    print(f"[DEBUG] All section names found: {section_names}")
+    sys.stdout.flush()
+
+    ongoing_sections = []
+    for page in data.get("pages", []):
+        for section in page.get("sections", []):
+            if section.get("section", "").strip().upper() == "REASON FOR VISIT/ONGOING MEDICAL PROBLEMS":
+                ongoing_sections.append(section)
+        for resp in page.get("responses", []):
+            if resp.get("section", "").strip().upper() == "REASON FOR VISIT/ONGOING MEDICAL PROBLEMS":
+                ongoing_sections.append(resp)
+
+    if not ongoing_sections:
+        return "No ongoing medical problems found."
+
+    print(f"[DEBUG] Raw ongoing_sections: {ongoing_sections}")
+    sys.stdout.flush()
+    lines = []
+    for section in ongoing_sections:
+        for q in section.get("questions", []):
+            question = q.get("question", "")
+            answer = q.get("answer")
+            if answer is not None and str(answer).strip():
+                lines.append(f"{question}: {answer}")
+    print(f"[DEBUG] Extracted ongoing medical problems lines: {lines}")
+    sys.stdout.flush()
+    return "\n".join(lines) if lines else "No ongoing medical problems details available."
 from selenium.webdriver.remote.webdriver import WebDriver
 from pathlib import Path
+from automation.ui_selectors import UI_SELECTORS
+from datetime import datetime
 def _build_nutrition_history_summary(intake_json: Path) -> str:
     """Summarize supplements from the Nutrition History section."""
     import json
@@ -25,111 +243,7 @@ def _build_nutrition_history_summary(intake_json: Path) -> str:
 
 def _populate_nutrition_history(driver, summary_text, timeout=15) -> bool:
     """Open nutrition history editor, populate textarea, and save."""
-    import time
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
-    from selenium.webdriver.common.keys import Keys
-    import logging
-    LOGGER = logging.getLogger(__name__)
-    LOGGER.info(f"NutritionHistory | Attempting UI fill | summary_text: {summary_text!r}")
-    if not summary_text.strip():
-        LOGGER.info("Nutrition history summary is empty; skipping population.")
-        return False
-    wait = WebDriverWait(driver, timeout)
-    _dismiss_any_popups(driver)
-    add_mode_entered = False
-    # Try main add button, fallback to edit button
-    try:
-        section_container = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-element='nutritionHistory-section']")))
-        _dismiss_any_popups(driver)
-        try:
-            add_btn = section_container.find_element(By.CSS_SELECTOR, "[data-element='past-medical-history-field-add-button']")
-        except Exception:
-            add_btn = section_container.find_element(By.CSS_SELECTOR, "[data-element='past-medical-history-field-item-0']")
-        try:
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", add_btn)
-        except Exception:
-            pass
-        _dismiss_any_popups(driver)
-        try:
-            add_btn.click()
-        except Exception:
-            driver.execute_script("arguments[0].click();", add_btn)
-        add_mode_entered = True
-    except Exception:
-        LOGGER.info("Nutrition history UI elements not found / not filled.")
-        return False
-
-    # Text area
-    _dismiss_any_popups(driver)
-    try:
-        textarea = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-element='nutritionHistory-detail-text-area']")))
-        LOGGER.info("NutritionHistory | Found textarea element, attempting to fill.")
-    except Exception:
-        LOGGER.info("Nutrition history textarea not found.")
-        return False
-    try:
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", textarea)
-    except Exception:
-        pass
-    try:
-        textarea.clear()
-    except Exception:
-        try:
-            textarea.send_keys(Keys.CONTROL, 'a')
-            textarea.send_keys(Keys.DELETE)
-        except Exception:
-            pass
-    try:
-        textarea.send_keys(summary_text)
-        driver.execute_script("arguments[0].blur();", textarea)
-        LOGGER.info(f"NutritionHistory | textarea value after fill: {textarea.get_attribute('value')!r}")
-    except Exception as e:
-        LOGGER.error(f"Failed to send nutrition history summary to textarea: {e}")
-        _capture_nutrition_debug(driver, "sendkeys-fail")
-        return False
-
-    # Save button
-    _dismiss_any_popups(driver)
-    try:
-        save_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-element='btn-save']")))
-        LOGGER.info("NutritionHistory | Found save button, attempting to click.")
-    except Exception as e:
-        LOGGER.error(f"Nutrition history save button not found: {e}")
-        _capture_nutrition_debug(driver, "no-save-btn")
-        return False
-    try:
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", save_btn)
-    except Exception as e:
-        LOGGER.warning(f"Nutrition history: failed to scroll save button into view: {e}")
-        _capture_nutrition_debug(driver, "scroll-save-fail")
-    try:
-        save_btn.click()
-    except Exception as e:
-        LOGGER.error(f"Nutrition history: failed to click save button: {e}")
-        _capture_nutrition_debug(driver, "click-save-fail")
-        try:
-            driver.execute_script("arguments[0].click();", save_btn)
-        except Exception as e2:
-            LOGGER.warning(f"Nutrition history: JS click save button failed: {e2}")
-            _capture_nutrition_debug(driver, "js-click-save-fail")
-            return False
-    try:
-        WebDriverWait(driver, 5).until(
-            lambda d: (not save_btn.is_displayed()) or (not save_btn.is_enabled())
-        )
-    except Exception as e:
-        LOGGER.warning(f"Nutrition history: save button did not disappear/disable: {e}")
-        _capture_nutrition_debug(driver, "save-btn-not-disappear")
-        try:
-            _wait_for_data_load(driver, timeout=5)
-        except Exception as e2:
-            LOGGER.info(f"Nutrition history save button did not disappear or disable after click: {e2}")
-            _capture_nutrition_debug(driver, "save-btn-wait-data-fail")
-            return False
-    LOGGER.info("Filled nutrition history text area for patient.")
-    return True
+    return populate_section_generic(driver, summary_text, "nutrition_history", timeout, debug_capture=_capture_nutrition_debug)
 
 def _capture_nutrition_debug(driver, reason: str):
     """Capture screenshot and page source for nutrition history debug."""
@@ -148,7 +262,6 @@ def _capture_nutrition_debug(driver, reason: str):
             f.write(driver.page_source)
     except Exception:
         pass
-from pathlib import Path
 # ---------------- Ongoing Medical Problems Summary Helpers -----------------
 def _build_ongoing_medical_problems_summary(intake_json: Path) -> str:
     """Summarize Reason for visit/Ongoing Medical Problems section: list ticked labels."""
@@ -180,15 +293,7 @@ def _build_ongoing_medical_problems_summary(intake_json: Path) -> str:
     return ""
 
 def _populate_ongoing_medical_problems(driver: WebDriver, summary_text: str, timeout: int = 15) -> bool:
-    # ...existing code...
-    """Open the ongoing medical problems editor, populate textarea, and save."""
-    if not summary_text.strip():
-        return False
-    wait = WebDriverWait(driver, timeout)
-    # Dismiss any popups before starting
-    _dismiss_any_popups(driver)
-    add_mode_entered = False
-    # Try main add button, fallback to edit button
+    return populate_section_generic(driver, summary_text, "ongoing_medical_problems", timeout)
 
 # --- Major Events Summary Helper ---
 def _build_major_events_summary(intake_json: Path) -> str:
@@ -272,97 +377,7 @@ def _build_major_events_summary(intake_json: Path) -> str:
     return "\n".join(lines)
 
 def _populate_major_events(driver: WebDriver, summary_text: str, timeout: int = 15) -> bool:
-    """Open the major events editor, populate textarea, and save."""
-    if not summary_text.strip():
-        return False
-    wait = WebDriverWait(driver, timeout)
-    # Dismiss any popups before starting
-    _dismiss_any_popups(driver)
-    add_mode_entered = False
-    # Try main add button, fallback to edit button
-    add_btn = None
-    try:
-        section_container = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-element='events-section']")))
-        _dismiss_any_popups(driver)
-        try:
-            add_btn = section_container.find_element(By.CSS_SELECTOR, "[data-element='past-medical-history-field-add-button']")
-        except Exception:
-            add_btn = section_container.find_element(By.CSS_SELECTOR, "[data-element='past-medical-history-field-item-0']")
-        try:
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", add_btn)
-        except Exception:
-            pass
-        _dismiss_any_popups(driver)
-        try:
-            add_btn.click()
-        except Exception:
-            driver.execute_script("arguments[0].click();", add_btn)
-        add_mode_entered = True
-    except Exception:
-        return False
-
-    # Text area (prefer events-detail-text-area, fallback to family-health-history-text-area)
-    textarea = None
-    candidates = [
-        "[data-element='events-detail-text-area']",
-        "[data-element='family-health-history-text-area']",
-    ]
-    for css_sel in candidates:
-        try:
-            textarea = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, css_sel)))
-            if textarea:
-                break
-        except Exception:
-            continue
-    if not textarea:
-        return False
-    _dismiss_any_popups(driver)
-    try:
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", textarea)
-    except Exception:
-        pass
-    try:
-        textarea.clear()
-    except Exception:
-        try:
-            textarea.send_keys(Keys.CONTROL, 'a')
-            textarea.send_keys(Keys.DELETE)
-        except Exception:
-            pass
-    try:
-        textarea.send_keys(summary_text)
-        # Trigger blur to ensure UI enables save button
-        driver.execute_script("arguments[0].blur();", textarea)
-    except Exception:
-        return False
-
-    # Save button
-    _dismiss_any_popups(driver)
-    try:
-        save_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-element='btn-save']")))
-    except Exception:
-        return False
-    try:
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", save_btn)
-    except Exception:
-        pass
-    try:
-        save_btn.click()
-    except Exception:
-        try:
-            driver.execute_script("arguments[0].click();", save_btn)
-        except Exception:
-            return False
-    try:
-        WebDriverWait(driver, 5).until(
-            lambda d: (not save_btn.is_displayed()) or (not save_btn.is_enabled())
-        )
-    except Exception:
-        try:
-            _wait_for_data_load(driver, timeout=5)
-        except Exception:
-            pass
-    return True
+    return populate_section_generic(driver, summary_text, "major_events", timeout)
 
 import logging
 from typing import Optional, List, Dict
@@ -714,6 +729,7 @@ def select_relative_date_in_datepicker(driver: WebDriver, offset_days: int = -1,
 
 
 def print_patient_links_from_table(driver: WebDriver, timeout: int = 15) -> list[str]:
+    from urllib.parse import urlparse, unquote
     """Collect links that match required pattern after date change and return them.
 
             try:
@@ -731,14 +747,13 @@ def print_patient_links_from_table(driver: WebDriver, timeout: int = 15) -> list
     except TimeoutException:
         LOGGER.info("table.data-table__grid not found within %ss; skipping patient link collection.", timeout)
         return []
-    except Exception:
-        LOGGER.debug("Error locating table.data-table__grid.", exc_info=True)
+    except Exception as e:
+        LOGGER.error(f"Unexpected error in patient link table wait: {e}", exc_info=True)
         return []
 
+    links: list[str] = []
     try:
-        anchors = driver.find_elements(By.CSS_SELECTOR, "table.data-table__grid a[href*='/PF/charts/patients/']")
-        from urllib.parse import urlparse, unquote
-        links: list[str] = []
+        anchors = driver.find_elements(By.CSS_SELECTOR, "table.data-table__grid a[href]")
         for a in anchors:
             try:
                 href = a.get_attribute("href") or ""
@@ -774,8 +789,8 @@ def print_patient_links_from_table(driver: WebDriver, timeout: int = 15) -> list
         if not ordered_unique:
             LOGGER.info("No matching patient links (ending with 'summary') found under table.data-table__grid.")
         return ordered_unique
-    except Exception:
-        LOGGER.debug("Error while extracting patient links.", exc_info=True)
+    except Exception as e:
+        LOGGER.error(f"Error while extracting patient links: {e}", exc_info=True)
         return []
 
 
@@ -796,6 +811,20 @@ def _wait_for_data_load(driver: WebDriver, timeout: int = 30) -> None:
             pass
 
 
+def _to_timeline_url(href: str) -> str:
+    """Convert a patient summary URL to the timeline (pending documents) URL."""
+    # Example: /PF/charts/patients/<id>/summary -> /PF/charts/patients/<id>/timeline/pendingdocuments
+    if href.endswith("/summary"):
+        return href.replace("/summary", "/timeline/pendingdocuments")
+    return href
+
+def _to_timeline_url_with_view(href: str, view: str) -> str:
+    """Convert a patient summary URL to the timeline URL for a specific view (e.g., signeddocuments)."""
+    # Example: /PF/charts/patients/<id>/summary -> /PF/charts/patients/<id>/timeline/<view>
+    if href.endswith("/summary"):
+        return href.replace("/summary", f"/timeline/{view}")
+    return href
+
 def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offset_days: int = -1, staging_dir: Optional[Path] = None) -> None:
     # Always attempt to click the 'Schedule' item once we believe we're logged in
     click_schedule(driver)
@@ -808,204 +837,341 @@ def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offs
 
     # After date change, collect patient chart links and print them
     links = print_patient_links_from_table(driver)
+    if not isinstance(links, list):
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] Patient links is not a list (type={type(links)}); setting to empty list.")
+        links = []
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [INFO] Found {len(links)} patients.")
     if links:
-        print("\n".join(links))
-        LOGGER.info("Collected %s patient links; beginning per-link navigation.", len(links))
-    else:
-        LOGGER.info("No patient links collected; skipping per-link navigation.")
-
-    # Loop through the collected links, opening each in the same browser window and pausing 5 seconds
-    for idx, href in enumerate(links, start=1):
-        try:
+        patient_ids = [_extract_patient_id(href) for href in links]
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [INFO] Patient IDs:")
+        for pid in patient_ids:
+            print(f"  {pid}")
+        for idx, href in enumerate(links, start=1):
             patient_id = _extract_patient_id(href)
-            # Build timeline URL (pending documents) from summary URL before opening
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [PATIENT] {patient_id} | Start flow [{idx}/{len(links)}]")
             timeline_href = _to_timeline_url(href)
-            LOGGER.info("[%s/%s] Opening patient timeline link: %s", idx, len(links), timeline_href)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [NAV] {patient_id} | Opened timeline link: {timeline_href}")
             driver.get(timeline_href)
             _wait_for_data_load(driver, timeout=30)
 
-            # Click the first occurrence of an 'intake' document-type entry if present
+            # Try pending view first
+            found_in = None
+            clicked = False
             try:
                 clicked = _click_first_intake_document_type(driver, timeout=4)
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [DOC] {patient_id} | Intake document link clicked in pending: {'Success' if clicked else 'Failure'}")
+                dest_pdf = None
                 if clicked:
-                    LOGGER.info("Clicked first 'intake' document-type link.")
                     try:
                         dest_pdf = _download_intake_document_if_available(driver, timeout=15, staging_dir=staging_dir, patient_id=patient_id)
-                        if dest_pdf:
-                            LOGGER.info("Downloaded and moved intake PDF to: %s", dest_pdf)
-                            # Run extractor to produce <patientId>-intake-details.json and log
-                            if patient_id and staging_dir:
-                                output_json = staging_dir / f"{patient_id}-intake-details.json"
-                                log_file = staging_dir / f"{patient_id}-intake-log.txt"
-                                run_intake_extractor(dest_pdf, output_json, log_file)
-                        else:
-                            LOGGER.info("Download button [data-element='download-doc-btn'] not found or not clickable.")
-                    except Exception:
-                        LOGGER.debug("Error attempting to click download button.", exc_info=True)
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [DOC] {patient_id} | Downloaded intake PDF: {'Success' if dest_pdf else 'Failure'}")
+                        if dest_pdf and patient_id and staging_dir:
+                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [STAGING] {patient_id} | PDF moved to staging: {dest_pdf}")
+                            output_json = staging_dir / f"{patient_id}-intake-details.json"
+                            log_file = staging_dir / f"{patient_id}-intake-log.txt"
+                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [PARSER] {patient_id} | Starting PDF parser...")
+                            parser_success = run_intake_extractor(dest_pdf, output_json, log_file)
+                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [PARSER] {patient_id} | PDF parser finished: {'Success' if parser_success else 'Failure'}")
+                        found_in = "pending"
+                    except Exception as e:
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] {patient_id} | Download error: {e}")
                 else:
-                    LOGGER.info("No 'intake' document-type link found in pending documents; trying signed documents view.")
-                    # Fallback: try the signed documents timeline
+                    # Try signed view if not found in pending
+                    found_in = "signed"
                     signed_href = _to_timeline_url_with_view(href, 'signeddocuments')
-                    LOGGER.info("Opening patient signed documents timeline link: %s", signed_href)
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [NAV] {patient_id} | Tried signed documents view: {signed_href}")
                     driver.get(signed_href)
                     _wait_for_data_load(driver, timeout=30)
                     try:
                         clicked2 = _click_first_intake_document_type(driver, timeout=20)
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [DOC] {patient_id} | Intake document link clicked in signed: {'Success' if clicked2 else 'Failure'}")
+                        dest_pdf = None
                         if clicked2:
-                            LOGGER.info("Clicked first 'intake' document-type link in signed documents view.")
                             try:
-                                dest_pdf2 = _download_intake_document_if_available(driver, timeout=15, staging_dir=staging_dir, patient_id=patient_id)
-                                if dest_pdf2:
-                                    LOGGER.info("Downloaded and moved intake PDF to (signed view): %s", dest_pdf2)
-                                    if patient_id and staging_dir:
-                                        output_json2 = staging_dir / f"{patient_id}-intake-details.json"
-                                        log_file2 = staging_dir / f"{patient_id}-intake-log.txt"
-                                        run_intake_extractor(dest_pdf2, output_json2, log_file2)
-                                else:
-                                    LOGGER.info("Download button not found/clickable in signed documents view.")
-                            except Exception:
-                                LOGGER.debug("Error attempting to click download button in signed documents view.", exc_info=True)
-                        else:
-                            LOGGER.info("No 'intake' document-type link found in signed documents view either.")
-                    except Exception:
-                        LOGGER.debug("Error while attempting to click 'intake' in signed documents view.", exc_info=True)
-            except Exception:
-                LOGGER.debug("Error while attempting to click 'intake' document-type link.", exc_info=True)
+                                dest_pdf = _download_intake_document_if_available(driver, timeout=15, staging_dir=staging_dir, patient_id=patient_id)
+                                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [DOC] {patient_id} | Downloaded intake PDF (signed): {'Success' if dest_pdf else 'Failure'}")
+                                if dest_pdf and patient_id and staging_dir:
+                                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [STAGING] {patient_id} | PDF moved to staging (signed): {dest_pdf}")
+                                    output_json = staging_dir / f"{patient_id}-intake-details.json"
+                                    log_file = staging_dir / f"{patient_id}-intake-log.txt"
+                                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [PARSER] {patient_id} | Starting PDF parser (signed)...")
+                                    parser_success = run_intake_extractor(dest_pdf, output_json, log_file)
+                                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [PARSER] {patient_id} | PDF parser finished (signed): {'Success' if parser_success else 'Failure'}")
+                            except Exception as e:
+                                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] {patient_id} | Download error (signed): {e}")
+                    except Exception as e:
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] {patient_id} | Signed view download error: {e}")
+            except Exception as e:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] {patient_id} | Intake document navigation error: {e}")
 
-            # After processing (whether or not an intake PDF was found), return to the original summary page
-            returned_to_summary = False
-            try:
-                if href:
-                    LOGGER.info("Returning to patient summary page: %s", href)
-                    driver.get(href)
-                    _wait_for_data_load(driver, timeout=30)
-                    # Attempt to dismiss any popups/modals that might obscure form fields
-                    try:
-                        dismissed = _dismiss_any_popups(driver)
-                        if dismissed:
-                            LOGGER.info("Dismissed %s popup/modal element(s) on summary load.", dismissed)
-                    except Exception:
-                        LOGGER.debug("Error while attempting to dismiss popups after summary load.", exc_info=True)
-                    returned_to_summary = True
-            except Exception:
-                LOGGER.debug("Failed to return to summary page for %s; continuing.", href, exc_info=True)
+            # Return to summary page and dismiss popups
+            if href:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [NAV] {patient_id} | Returned to summary page: {href}")
+                driver.get(href)
+                _wait_for_data_load(driver, timeout=30)
+                try:
+                    dismissed = _dismiss_any_popups(driver)
+                    if dismissed:
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [NAV] {patient_id} | Dismissed {dismissed} popup/modal(s) on summary load.")
+                except Exception as e:
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] {patient_id} | Popup dismiss error: {e}")
 
-            # Populate Family History, Social History, Major Events, Ongoing Medical Problems, Nutrition History (only once per patient)
-            if returned_to_summary and staging_dir and patient_id:
+            # Intake JSON summary extraction
+            if staging_dir and patient_id:
                 intake_json = staging_dir / f"{patient_id}-intake-details.json"
-                if intake_json.exists():
+                if not intake_json.exists():
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [SUMMARY] {patient_id} | Intake JSON does not exist: {intake_json}")
+                else:
                     # Family History
                     try:
                         fam_text = _build_family_history_summary(intake_json)
-                        LOGGER.debug("Family History summary for patient %s:\n%s", patient_id, fam_text)
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [SUMMARY] {patient_id} | Family History summary: {fam_text}")
+                        fam_filled = False
                         if fam_text:
-                            if _populate_family_history(driver, fam_text):
-                                LOGGER.info("Filled family history text area for patient %s", patient_id)
-                            else:
-                                LOGGER.info("Family history UI elements not found / not filled for patient %s", patient_id)
-                    except Exception:
-                        LOGGER.debug("Error while building / populating family history summary for %s", patient_id, exc_info=True)
+                            fam_filled = _populate_family_history(driver, fam_text)
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [UI] {patient_id} | Family History UI action: {'Success' if fam_filled else 'Failure'}")
+                    except Exception as e:
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] {patient_id} | Family History: {e}")
                     # Social History
                     try:
-                        social_text = _build_social_history_summary(intake_json)
-                        LOGGER.debug("Social History summary for patient %s:\n%s", patient_id, social_text)
-                        if social_text:
-                            if _populate_social_history(driver, social_text):
-                                LOGGER.info("Filled social history text area for patient %s", patient_id)
-                            else:
-                                LOGGER.info("Social history UI elements not found / not filled for patient %s", patient_id)
-                    except Exception:
-                        LOGGER.debug("Error while building / populating social history summary for %s", patient_id, exc_info=True)
-                    # Major Events
-                    try:
-                        major_events_text = _build_major_events_summary(intake_json)
-                        LOGGER.debug("Major Events summary for patient %s:\n%s", patient_id, major_events_text)
-                        if major_events_text:
-                            if _populate_major_events(driver, major_events_text):
-                                LOGGER.info("Filled major events text area for patient %s", patient_id)
-                            else:
-                                LOGGER.info("Major events UI elements not found / not filled for patient %s", patient_id)
-                    except Exception:
-                        LOGGER.debug("Error while building / populating major events summary for %s", patient_id, exc_info=True)
+                        soc_text = _build_social_history_summary(intake_json)
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [SUMMARY] {patient_id} | Social History summary: {soc_text}")
+                        soc_filled = False
+                        if soc_text:
+                            soc_filled = _populate_social_history(driver, soc_text)
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [UI] {patient_id} | Social History UI action: {'Success' if soc_filled else 'Failure'}")
+                    except Exception as e:
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] {patient_id} | Social History: {e}")
                     # Ongoing Medical Problems
                     try:
-                        ongoing_medical_text = _build_ongoing_medical_problems_summary(intake_json)
-                        LOGGER.debug("Ongoing Medical Problems summary for patient %s:\n%s", patient_id, ongoing_medical_text)
-                        if ongoing_medical_text:
-                            if _populate_ongoing_medical_problems(driver, ongoing_medical_text):
-                                LOGGER.info("Filled ongoing medical problems text area for patient %s", patient_id)
-                            else:
-                                LOGGER.info("Ongoing medical problems UI elements not found / not filled for patient %s", patient_id)
-                    except Exception:
-                        LOGGER.debug("Error while building / populating ongoing medical problems summary for %s", patient_id, exc_info=True)
+                        ongoing_text = _build_ongoing_medical_problems_summary(intake_json)
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [SUMMARY] {patient_id} | Ongoing Medical Problems summary: {ongoing_text}")
+                        ongoing_filled = False
+                        if ongoing_text:
+                            ongoing_filled = _populate_ongoing_medical_problems(driver, ongoing_text)
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [UI] {patient_id} | Ongoing Medical Problems UI action: {'Success' if ongoing_filled else 'Failure'}")
+                    except Exception as e:
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] {patient_id} | Ongoing Medical Problems: {e}")
+                    # Major Events
+                    try:
+                        major_text = _build_major_events_summary(intake_json)
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [SUMMARY] {patient_id} | Major Events summary: {major_text}")
+                        major_filled = False
+                        if major_text:
+                            major_filled = _populate_major_events(driver, major_text)
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [UI] {patient_id} | Major Events UI action: {'Success' if major_filled else 'Failure'}")
+                    except Exception as e:
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] {patient_id} | Major Events: {e}")
                     # Nutrition History
                     try:
                         nutrition_text = _build_nutrition_history_summary(intake_json)
-                        LOGGER.info("Nutrition History summary for patient %s: %r", patient_id, nutrition_text)
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [SUMMARY] {patient_id} | Nutrition History summary: {nutrition_text}")
+                        nutrition_filled = False
                         if nutrition_text:
-                            if _populate_nutrition_history(driver, nutrition_text):
-                                LOGGER.info("Filled nutrition history text area for patient %s", patient_id)
-                            else:
-                                LOGGER.info("Nutrition history UI elements not found / not filled for patient %s", patient_id)
-                        else:
-                            LOGGER.info("Nutrition History summary is empty for patient %s", patient_id)
-                    except Exception:
-                        LOGGER.debug("Error while building / populating nutrition history summary for %s", patient_id, exc_info=True)
-        except Exception:
-            LOGGER.debug("Error opening patient link: %s", href, exc_info=True)
+                            nutrition_filled = _populate_nutrition_history(driver, nutrition_text)
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [UI] {patient_id} | Nutrition History UI action: {'Success' if nutrition_filled else 'Failure'}")
+                    except Exception as e:
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] {patient_id} | Nutrition History: {e}")
 
-    if not url:
-        LOGGER.info("No post-login URL provided; staying on current page.")
-        return
-    LOGGER.info("Navigating to %s", url)
-    driver.get(url)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [END] End patient loop idx={idx}, patient_id={patient_id}")
 
-
-def _to_timeline_url(href: str) -> str:
-    """Convert a patient 'summary' route to 'timeline/pendingdocuments' while preserving query/fragment structure."""
-    return _to_timeline_url_with_view(href, 'pendingdocuments')
-
-
-def _to_timeline_url_with_view(href: str, view: str) -> str:
-    """Convert a patient 'summary' route to 'timeline/<view>' while preserving query/fragment structure.
-
-    Supports SPA hash routes where the PF route is in the fragment and standard path routes.
+# --- Move generic handler and wrappers to top-level scope ---
+def populate_section_generic(driver, summary_text, section_key, timeout=15, debug_capture=None) -> bool:
     """
+    Generic handler to populate a summary into a UI section using selectors from UI_SELECTORS.
+    """
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.common.keys import Keys
+    LOGGER = logging.getLogger(__name__)
+    selectors = UI_SELECTORS.get(section_key)
+    if not selectors:
+        LOGGER.error(f"No selectors found for section '{section_key}'")
+        return False
+    selectors = UI_SELECTORS.get(section_key)
+    if not selectors:
+        print(f"[GENERIC] No selectors found for section '{section_key}'")
+        return False
+    if not summary_text.strip():
+        print(f"[GENERIC] {section_key}: Skipped, summary is empty.")
+        return False
+    wait = WebDriverWait(driver, timeout + 10)
+    _dismiss_any_popups(driver)
+    # --- Robust section/add/edit button search ---
+    section_elems = driver.find_elements(By.CSS_SELECTOR, selectors["section_container"])
+    print(f"[GENERIC] {section_key}: Found {len(section_elems)} section containers.")
+    found_btn = None
+    for idx, section_container in enumerate(section_elems):
+        add_btns = section_container.find_elements(By.CSS_SELECTOR, selectors["add_button"])
+        print(f"[GENERIC] {section_key}: Section {idx}: Found {len(add_btns)} add buttons.")
+        for btn_idx, btn in enumerate(add_btns):
+            visible = btn.is_displayed()
+            enabled = btn.is_enabled()
+            print(f"[GENERIC] {section_key}: Section {idx} Add Button {btn_idx}: visible={visible}, enabled={enabled}")
+            if visible and enabled:
+                found_btn = btn
+                break
+        if found_btn:
+            section_found_idx = idx
+            break
+    if not found_btn:
+        # Try edit buttons as fallback
+        for idx, section_container in enumerate(section_elems):
+            edit_btns = section_container.find_elements(By.CSS_SELECTOR, selectors["edit_button"])
+            print(f"[GENERIC] {section_key}: Section {idx}: Found {len(edit_btns)} edit buttons.")
+            for btn_idx, btn in enumerate(edit_btns):
+                visible = btn.is_displayed()
+                enabled = btn.is_enabled()
+                # --- Diagnostics for edit button ---
+                attrs = {
+                    "class": btn.get_attribute("class"),
+                    "style": btn.get_attribute("style"),
+                    "aria": btn.get_attribute("aria-*"),
+                    "location": btn.location,
+                    "size": btn.size
+                }
+                print(f"[GENERIC] {section_key}: Section {idx} Edit Button {btn_idx}: visible={visible}, enabled={enabled}, attrs={attrs}")
+                # Try to scroll into view if not visible
+                if not visible:
+                    try:
+                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
+                        print(f"[GENERIC] {section_key}: Section {idx} Edit Button {btn_idx}: scrolled into view.")
+                        visible = btn.is_displayed()
+                        print(f"[GENERIC] {section_key}: Section {idx} Edit Button {btn_idx}: visible after scroll={visible}")
+                    except Exception as e:
+                        print(f"[GENERIC] {section_key}: Section {idx} Edit Button {btn_idx}: scroll error: {e}")
+                if visible and enabled:
+                    found_btn = btn
+                    break
+                # Fallback: if enabled but not visible, try JS click
+                if enabled and not visible:
+                    try:
+                        print(f"[GENERIC] {section_key}: Section {idx} Edit Button {btn_idx}: enabled but not visible, trying JS click.")
+                        driver.execute_script("arguments[0].click();", btn)
+                        found_btn = btn
+                        print(f"[GENERIC] {section_key}: Section {idx} Edit Button {btn_idx}: JS click attempted.")
+                        break
+                    except Exception as e:
+                        print(f"[GENERIC] {section_key}: Section {idx} Edit Button {btn_idx}: JS click error: {e}")
+            if found_btn:
+                section_found_idx = idx
+                break
+    if not found_btn:
+        print(f"[GENERIC] {section_key}: Could not find any visible/enabled add or edit button in any section. Capturing debug artifacts.")
+        if debug_capture:
+            debug_capture(driver, f"{section_key}-no-add-or-edit-btn")
+        return False
     try:
-        from urllib.parse import urlparse, urlunparse, unquote, quote
-        parsed = urlparse(href)
-        frag = unquote(parsed.fragment or "")
-        path = unquote(parsed.path or "")
-
-        def replace_trailing_summary(s: str) -> str:
-            s_main, sep, q = s.partition("?")
-            s_main = s_main.rstrip("/")
-            if s_main.endswith("summary"):
-                s_main = s_main[: -len("summary")] + f"timeline/{view}"
-            return s_main + (sep + q if sep else "")
-
-        if "/PF/charts/patients/" in frag:
-            new_frag = replace_trailing_summary(frag)
-            return urlunparse(parsed._replace(fragment=quote(new_frag, safe="/:?=&")))
-        if "/PF/charts/patients/" in path:
-            new_path = replace_trailing_summary(path)
-            return urlunparse(parsed._replace(path=quote(new_path, safe="/:?=&")))
-        # Fallback: naive string replace at end
-        if href.rstrip("/").endswith("summary"):
-            return href[: -len("summary")] + f"timeline/{view}"
+        found_btn.click()
     except Exception:
-        pass
-    return href
+        try:
+            print(f"[GENERIC] {section_key}: Could not click button, trying JS click.")
+            driver.execute_script("arguments[0].click();", found_btn)
+        except Exception:
+            print(f"[GENERIC] {section_key}: Could not click button. Skipping population.")
+            if debug_capture:
+                debug_capture(driver, f"{section_key}-click-fail")
+            return False
+    # --- Textarea logic ---
+    textarea = None
+    if "textarea_candidates" in selectors:
+        for css_sel in selectors["textarea_candidates"]:
+            try:
+                print(f"[GENERIC] {section_key}: Searching for textarea candidate: {css_sel}")
+                textarea = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, css_sel)))
+                print(f"[GENERIC] {section_key}: Textarea found: {css_sel}")
+                if textarea:
+                    break
+            except Exception:
+                print(f"[GENERIC] {section_key}: Textarea candidate not found: {css_sel}")
+                continue
+    else:
+        try:
+            print(f"[GENERIC] {section_key}: Searching for textarea: {selectors['textarea']}")
+            textarea = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, selectors["textarea"])))
+            print(f"[GENERIC] {section_key}: Textarea found: {selectors['textarea']}")
+        except Exception:
+            print(f"[GENERIC] {section_key}: Textarea not found. Skipping population.")
+            if debug_capture:
+                debug_capture(driver, f"{section_key}-no-textarea")
+            return False
+    if not textarea:
+        print(f"[GENERIC] {section_key}: Textarea not found. Skipping population.")
+        if debug_capture:
+            debug_capture(driver, f"{section_key}-no-textarea")
+        return False
+    try:
+        textarea.clear()
+    except Exception:
+        try:
+            textarea.send_keys(Keys.CONTROL, 'a')
+            textarea.send_keys(Keys.DELETE)
+        except Exception:
+            pass
+    try:
+        textarea.send_keys(summary_text)
+        driver.execute_script("arguments[0].blur();", textarea)
+    except Exception as e:
+        print(f"[GENERIC] {section_key}: Failed to fill textarea: {e}")
+        if debug_capture:
+            debug_capture(driver, f"{section_key}-sendkeys-fail")
+        return False
+    # --- Save button logic ---
+    _dismiss_any_popups(driver)
+    try:
+        print(f"[GENERIC] {section_key}: Searching for save button: {selectors['save_button']}")
+        save_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selectors["save_button"])))
+        print(f"[GENERIC] {section_key}: Save button found: {selectors['save_button']}")
+        save_btn.click()
+    except Exception as e:
+        print(f"[GENERIC] {section_key}: Save button not found: {e}")
+        if debug_capture:
+            debug_capture(driver, f"{section_key}-no-save-btn")
+        return False
+    try:
+        WebDriverWait(driver, 5).until(
+            lambda d: (not save_btn.is_displayed()) or (not save_btn.is_enabled())
+        )
+    except Exception:
+        try:
+            _wait_for_data_load(driver, timeout=5)
+        except Exception:
+            pass
+    print(f"[GENERIC] Summary population complete for section '{section_key}'.")
+    return True
 
+def _populate_social_history(driver, summary_text, timeout=15) -> bool:
+    return populate_section_generic(driver, summary_text, "social_history", timeout)
+    return populate_section_generic(driver, summary_text, "social_history", timeout)
+    return populate_section_generic(driver, summary_text, "social_history", timeout)
 
-def _print_if_intake_in_timeline_events(driver: WebDriver, timeout: int = 20) -> bool:
-    """Scan the timeline events table for 'intake' in the second column; if present,
-    print the hyperlink from the first column of that row to the console.
+def _populate_ongoing_medical_problems(driver, summary_text, timeout=15) -> bool:
+    return populate_section_generic(driver, summary_text, "ongoing_medical_problems", timeout)
 
-    Returns True if an 'intake' row is found (and hyperlink printed when available); else False.
-    """
-    wait = WebDriverWait(driver, timeout)
-    table = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-element='timeline-events-table']")))
+def _populate_major_events(driver, summary_text, timeout=15) -> bool:
+    return populate_section_generic(driver, summary_text, "major_events", timeout)
+    return populate_section_generic(driver, summary_text, "ongoing_medical_problems", timeout)
+    # TODO: Implement family history summary builder
+    return ""
+    # TODO: Implement social history summary builder
+    return ""
+    # TODO: Implement major events summary builder
+    return ""
+    # TODO: Implement ongoing medical problems summary builder
+    return ""
+    return populate_section_generic(driver, summary_text, "major_events", timeout)
+    return populate_section_generic(driver, summary_text, "ongoing_medical_problems", timeout)
+    # TODO: Implement family history summary builder
+    return ""
+    # TODO: Implement social history summary builder
+    return ""
+    # TODO: Implement major events summary builder
+    return ""
+    # TODO: Implement ongoing medical problems summary builder
+    return ""
+    return populate_section_generic(driver, summary_text, "major_events", timeout)
+
     try:
         rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
         for r in rows:
@@ -1028,6 +1194,7 @@ def _print_if_intake_in_timeline_events(driver: WebDriver, timeout: int = 20) ->
                     return True
     except Exception:
         LOGGER.debug("Error while scanning timeline events table rows.", exc_info=True)
+        pass
     return False
 
 
@@ -1202,230 +1369,10 @@ def _dismiss_any_popups(driver: WebDriver, timeout: int = 5) -> int:
       - Attempt click (normal then JS) and count successes.
       - Suppress errors; return number of elements we attempted to dismiss successfully.
     """
-    potential_selectors = [
-        "[data-element='close-modal']",
-        "[data-element='modal-close']",
-        "button.close",
-        "button[aria-label='Close']",
-        "[data-element='btn-dismiss']",
-        "[data-element='popup-dismiss']",
-        "[data-element='notification-dismiss']",
-        "div.modal button[type='button'] span[class*='close']",
-    ]
+    # Actual popup dismiss logic should go here
+    # For now, just return 0 (no popups dismissed)
     dismissed = 0
-    try:
-        for sel in potential_selectors:
-            try:
-                buttons = driver.find_elements(By.CSS_SELECTOR, sel)
-            except Exception:
-                continue
-            for btn in buttons:
-                try:
-                    if not btn.is_displayed():
-                        continue
-                    try:
-                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
-                    except Exception:
-                        pass
-                    try:
-                        btn.click()
-                    except Exception:
-                        try:
-                            driver.execute_script("arguments[0].click();", btn)
-                        except Exception:
-                            continue
-                    dismissed += 1
-                except Exception:
-                    continue
-    except Exception:
-        pass
     return dismissed
-
-
-# Extraction logic has been moved to automation.extraction.run_intake_extractor
-
-
-# ---------------- Family History Summary Helpers -----------------
-def _build_family_history_summary(intake_json: Path) -> str:
-    """Build a concise family history summary from the intake JSON file.
-
-    Strategy:
-      - Locate response blocks whose section name contains 'FAMILY HISTORY'.
-      - Extract question/answer pairs.
-      - Group consecutive pairs (Age, Medical Conditions) for each relative when possible.
-    Fallback: list each answered question on its own line.
-    """
-    import logging
-    logger = logging.getLogger(__name__)
-    try:
-        data = json.loads(intake_json.read_text(encoding="utf-8", errors="ignore") or "{}")
-    except Exception:
-        logger.debug(f"[FamilyHistory] Failed to read or parse {intake_json}")
-        return ""
-
-    pages = data.get("pages") or []
-    qa_pairs: List[Dict[str, str]] = []
-    for page in pages:
-        if not isinstance(page, dict):
-            continue
-        responses = page.get("responses", []) or []
-        for resp in responses:
-            if not isinstance(resp, dict):
-                continue
-            section_name = (resp.get("section") or "").strip()
-            if section_name and "family" in section_name.lower() and "history" in section_name.lower():
-                for q in resp.get("questions", []) or []:
-                    if not isinstance(q, dict):
-                        continue
-                    qtext = (q.get("question") or "").strip()
-                    ans = q.get("answer")
-                    if ans is None:
-                        continue
-                    ans_s = str(ans).strip()
-                    if not ans_s:
-                        continue
-                    qa_pairs.append({"q": qtext, "a": ans_s})
-    logger.debug(f"[FamilyHistory] Extracted {len(qa_pairs)} Q/A pairs from {intake_json}")
-    if not qa_pairs:
-        logger.debug(f"[FamilyHistory] No family history Q/A pairs found in {intake_json}")
-        return ""
-
-    summary_lines: List[str] = []
-    used = set()
-    for i, pair in enumerate(qa_pairs):
-        if i in used:
-            continue
-        q = pair["q"].strip()
-        a = pair["a"]
-        lower_q = q.lower()
-        if lower_q.endswith(" age"):
-            base = q[:-4].strip()
-            conditions = None
-            for j in range(i + 1, len(qa_pairs)):
-                if j in used:
-                    continue
-                nq_raw = qa_pairs[j]["q"].strip()
-                nq = nq_raw.lower()
-                if nq.endswith(" age") and nq_raw[:-4].strip() == base:
-                    break
-                if "medical" in nq and "condition" in nq:
-                    conditions = qa_pairs[j]["a"]
-                    used.add(j)
-                    break
-            if conditions:
-                summary_lines.append(f"{base}: Age {a}; Conditions: {conditions}")
-            else:
-                summary_lines.append(f"{base}: Age {a}")
-            used.add(i)
-        elif "medical" in lower_q and "condition" in lower_q:
-            summary_lines.append(f"{q}: {a}")
-            used.add(i)
-        else:
-            summary_lines.append(f"{q}: {a}")
-            used.add(i)
-    logger.debug(f"[FamilyHistory] Summary for {intake_json}: {summary_lines}")
-    return "\n".join(summary_lines)
-
-
-def _populate_family_history(driver: WebDriver, summary_text: str, timeout: int = 15) -> bool:
-    """Open the family history editor, populate textarea, and save.
-
-    Returns True if we believe the operation succeeded, else False.
-    """
-    if not summary_text.strip():
-        return False
-    wait = WebDriverWait(driver, timeout)
-    # Dismiss any popups before starting
-    _dismiss_any_popups(driver)
-    add_mode_entered = False
-    # Primary approach: click the explicit "add" button
-    try:
-        add_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-element='add-family-history-button']")))
-        _dismiss_any_popups(driver)
-        try:
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", add_btn)
-        except Exception:
-            pass
-        _dismiss_any_popups(driver)
-        try:
-            add_btn.click()
-        except Exception:
-            driver.execute_script("arguments[0].click();", add_btn)
-        add_mode_entered = True
-    except Exception:
-        # Fallback: existing family history text container (view mode) we can click to edit
-        try:
-            view_el = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-element='family-history-text']")))
-            _dismiss_any_popups(driver)
-            try:
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", view_el)
-            except Exception:
-                pass
-            _dismiss_any_popups(driver)
-            try:
-                view_el.click()
-            except Exception:
-                driver.execute_script("arguments[0].click();", view_el)
-            add_mode_entered = True
-        except Exception:
-            # Neither the add button nor the view text could be interacted with
-            return False
-
-    # Text area
-    _dismiss_any_popups(driver)
-    try:
-        textarea = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-element='family-health-history-text-area']")))
-    except Exception:
-        return False
-    try:
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", textarea)
-    except Exception:
-        pass
-    try:
-        textarea.clear()
-    except Exception:
-        # fallback to select-all delete
-        try:
-            textarea.send_keys(Keys.CONTROL, 'a')
-            textarea.send_keys(Keys.DELETE)
-        except Exception:
-            pass
-    try:
-        textarea.send_keys(summary_text)
-        # Trigger blur to ensure UI enables save button
-        driver.execute_script("arguments[0].blur();", textarea)
-    except Exception:
-        return False
-
-    # Save button
-    _dismiss_any_popups(driver)
-    try:
-        save_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-element='btn-save']")))
-    except Exception:
-        return False
-    try:
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", save_btn)
-    except Exception:
-        pass
-    try:
-        save_btn.click()
-    except Exception:
-        try:
-            driver.execute_script("arguments[0].click();", save_btn)
-        except Exception:
-            return False
-
-    # Post-save: wait briefly for either button to disable/disappear or for spinner inactivity
-    try:
-        WebDriverWait(driver, 5).until(
-            lambda d: (not save_btn.is_displayed()) or (not save_btn.is_enabled())
-        )
-    except Exception:
-        # Fallback to generic data load wait (non-fatal if it times out)
-        try:
-            _wait_for_data_load(driver, timeout=5)
-        except Exception:
-            pass
     return True
 
 

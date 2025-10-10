@@ -1,6 +1,7 @@
 ## Ignore processing artifacts
 Processing/
 config/Processing/
+artifacts/
 
 ## Python
 __pycache__/

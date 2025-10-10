@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import configparser
-import logging
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -14,12 +13,6 @@ from automation.login import LoginAutomation, LoginSelectors, Selector
 from automation.navigation import navigate_after_login
 
 
-def setup_logging(verbose: bool) -> None:
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    )
 
 
 def load_config(config_path: Path) -> configparser.ConfigParser:
@@ -85,7 +78,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
-    setup_logging(args.verbose)
+
+    cfg = load_config(Path(args.config))
 
     cfg = load_config(Path(args.config))
     base_url = cfg["site"].get("url")
@@ -126,9 +120,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # If forcing real profile while headless, switch to UI to avoid known instability
     if args.force_real_profile and args.headless:
-        logging.getLogger(__name__).warning(
-            "--force-real-profile specified with --headless; switching to UI mode to use the real profile."
-        )
+        print("--force-real-profile specified with --headless; switching to UI mode to use the real profile.")
         args.headless = False
 
     if args.kill_edge and os.name == "nt":
@@ -140,9 +132,9 @@ def main(argv: list[str] | None = None) -> int:
                 capture_output=True,
                 text=True,
             )
-            logging.getLogger(__name__).info("Killed running Edge processes (if any) to unlock the profile.")
+            print("Killed running Edge processes (if any) to unlock the profile.")
         except Exception:
-            logging.getLogger(__name__).warning("Failed to run taskkill; continuing.")
+            print("Failed to run taskkill; continuing.")
 
     edge_cfg = EdgeConfig(
         headless=args.headless,
@@ -169,24 +161,23 @@ def main(argv: list[str] | None = None) -> int:
         try:
             staging_dir.mkdir(parents=True, exist_ok=True)
             processed_dir.mkdir(parents=True, exist_ok=True)
-            logging.getLogger(__name__).info("Processing run directory: %s", run_dir)
+            print(f"Processing run directory: {run_dir}")
         except Exception:
-            logging.getLogger(__name__).warning("Unable to create Processing directories at %s", run_dir, exc_info=True)
+            print(f"Unable to create Processing directories at {run_dir}")
 
         navigate_after_login(driver, post_url, date_offset_days=date_offset_days, staging_dir=staging_dir)
         if post_actions_wait and post_actions_wait > 0:
-            logging.getLogger(__name__).info(
-                "Waiting %s seconds after navigation for verification...", post_actions_wait
-            )
+            print(f"Waiting {post_actions_wait} seconds after navigation for verification...")
             time.sleep(post_actions_wait)
     except Exception as exc:
-        logging.getLogger(__name__).error("Automation failed: %s", exc, exc_info=True)
-        return 1
-    finally:
-        if args.keep_open:
-            logging.getLogger(__name__).info("--keep-open specified; leaving the browser running.")
-        else:
+        print(f"Automation failed: {exc}")
+        if not args.keep_open:
             quit_driver(driver)
+        return 1
+    if args.keep_open:
+        print("--keep-open specified; leaving the browser running.")
+    else:
+        quit_driver(driver)
 
     return 0
 
