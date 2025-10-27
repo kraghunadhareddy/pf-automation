@@ -1,3 +1,109 @@
+# --- Preventive Care Summary Helper ---
+def build_preventive_care_summary(intake_json):
+    """
+    Extract summary from Preventive Care related sections for female patients only.
+    Sections: 'PREGNANCY HISTORY/PREVENTATIVE CARE', 'PREVENTATIVE CARE'
+    """
+    from pathlib import Path
+    sections_of_interest = [
+        "PREGNANCY HISTORY/PREVENTATIVE CARE",
+        "PREVENTATIVE CARE",
+    ]
+    try:
+        if isinstance(intake_json, str) or isinstance(intake_json, Path):
+            with open(intake_json, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = intake_json
+    except Exception:
+        return "No preventive care details found."
+
+    lines = []
+    for page in data.get("pages", []):
+        for section in page.get("sections", []):
+            sec_name = (section.get("section", "")).strip().upper()
+            if sec_name in [s.upper() for s in sections_of_interest]:
+                for q in section.get("questions", []):
+                    question = q.get("question", "")
+                    answer = q.get("answer")
+                    if answer is not None and str(answer).strip():
+                        lines.append(f"{question}: {answer}")
+        for resp in page.get("responses", []):
+            rsec = (resp.get("section", "")).strip().upper()
+            if rsec in [s.upper() for s in sections_of_interest]:
+                for q in resp.get("questions", []):
+                    question = q.get("question", "")
+                    answer = q.get("answer")
+                    if answer is not None and str(answer).strip():
+                        lines.append(f"{question}: {answer}")
+    if not lines:
+        return "No preventive care details found."
+    return "\n".join(lines)
+
+def populate_preventive_care(driver, summary_text, timeout=15):
+    from automation.ui_selectors import UI_SELECTORS
+    return populate_section_generic(driver, summary_text, "preventive_care", timeout)
+
+def process_preventive_care_if_female(driver, intake_json, timeout=15):
+    """
+    If global GENDER_IS_FEMALE is True, extract and populate preventive care summary.
+    """
+    global GENDER_IS_FEMALE
+    if GENDER_IS_FEMALE:
+        summary = build_preventive_care_summary(intake_json)
+        print(f"[PREVENTIVE] Summary for female patient: {summary}")
+        filled = False
+        if summary:
+            filled = populate_preventive_care(driver, summary, timeout)
+        print(f"[PREVENTIVE] UI action: {'Success' if filled else 'Failure'}")
+    else:
+        print("[PREVENTIVE] Skipped: Not a female patient.")
+import json
+from pathlib import Path
+
+# Global gender flag
+GENDER_IS_FEMALE = False
+
+def detect_gender_from_intake(intake_json):
+    """
+    Detect gender from intake JSON.
+    If any section or response is named 'Female Patient Information' (case-insensitive), return 'Female'.
+    If any section or response is named 'Male Patient Information' (case-insensitive), return 'Male'.
+    Returns None if not found.
+    """
+    try:
+        if isinstance(intake_json, str) or isinstance(intake_json, Path):
+            with open(intake_json, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = intake_json
+    except Exception:
+        return None
+    gender_found = None
+    for page in data.get("pages", []):
+        for section in page.get("sections", []):
+            sec_name = (section.get("section", "")).strip().lower()
+            if sec_name == "female patient information":
+                gender_found = "Female"
+            elif sec_name == "male patient information":
+                if gender_found != "Female":
+                    gender_found = "Male"
+        for resp in page.get("responses", []):
+            rsec = (resp.get("section", "")).strip().lower()
+            if rsec == "female patient information":
+                gender_found = "Female"
+            elif rsec == "male patient information":
+                if gender_found != "Female":
+                    gender_found = "Male"
+    return gender_found
+
+def set_global_gender_flag(intake_json):
+    """
+    Sets the global GENDER_IS_FEMALE flag based on intake JSON.
+    """
+    global GENDER_IS_FEMALE
+    gender = detect_gender_from_intake(intake_json)
+    GENDER_IS_FEMALE = (gender == "Female")
 def _populate_family_history(driver, summary_text, timeout=15) -> bool:
     return populate_section_generic(driver, summary_text, "family_history", timeout)
 
@@ -972,6 +1078,14 @@ def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offs
                         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [UI] {patient_id} | Nutrition History UI action: {'Success' if nutrition_filled else 'Failure'}")
                     except Exception as e:
                         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] {patient_id} | Nutrition History: {e}")
+
+                    # Preventive Care (Female only)
+                    try:
+                        from automation.navigation import set_global_gender_flag, process_preventive_care_if_female
+                        set_global_gender_flag(intake_json)
+                        process_preventive_care_if_female(driver, intake_json, timeout=15)
+                    except Exception as e:
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] {patient_id} | Preventive Care: {e}")
 
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [END] End patient loop idx={idx}, patient_id={patient_id}")
 
