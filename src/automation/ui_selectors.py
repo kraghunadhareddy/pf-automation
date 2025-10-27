@@ -36,5 +36,12 @@ UI_SELECTORS = {
         "edit_button": "[data-element='past-medical-history-field-item-0']",
         "textarea": "[data-element='nutritionHistory-detail-text-area']",
         "save_button": "[data-element='btn-save']"
+    },
+    "preventive_care": {
+        "section_container": "[data-element='preventativeCare-section']",
+        "add_button": "[data-element='past-medical-history-field-add-button']",
+        "edit_button": "[data-element='past-medical-history-field-item-0']",
+        "textarea": "[data-element='preventativeCare-detail-text-area']",
+        "save_button": "[data-element='btn-save']"
     }
 }

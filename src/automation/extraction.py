@@ -16,18 +16,27 @@ except ImportError as e:
     LOGGER.error("Please install the missing dependency with: pip install pdf2image")
     raise
 
+
+def get_extractor_repo_path_from_config(config_path: Path = Path("config/settings.ini")) -> Path:
+    import configparser
+    cfg = configparser.ConfigParser()
+    cfg.read(config_path, encoding="utf-8")
+    if cfg.has_section("extractor") and cfg["extractor"].get("repo_path"):
+        return Path(cfg["extractor"].get("repo_path"))
+    return Path(r"C:\Users\raghu\Documents\Python Projects\pdf-parser")
+
 def run_intake_extractor(
     pdf_path: Path,
     output_json: Path,
     log_file: Path,
     repo_path: Path | None = None,
 ) -> bool:
-    r"""Run external extractor from another repo and capture logs to a file.
+    """Run external extractor from another repo and capture logs to a file.
 
-    Defaults repo_path to:
-    C:\Users\raghu\Documents\Python Projects\pdf-parser
+    Reads repo_path from config/settings.ini [extractor] section if not provided.
     """
-    repo_path = repo_path or Path(r"C:\Users\raghu\Documents\Python Projects\pdf-parser")
+    if repo_path is None:
+        repo_path = get_extractor_repo_path_from_config()
     success = False
     log_file.parent.mkdir(parents=True, exist_ok=True)
     with open(log_file, "w", encoding="utf-8", errors="ignore") as lf:
