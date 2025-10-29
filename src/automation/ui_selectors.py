@@ -43,5 +43,18 @@ UI_SELECTORS = {
         "edit_button": "[data-element='past-medical-history-field-item-0']",
         "textarea": "[data-element='preventativeCare-detail-text-area']",
         "save_button": "[data-element='btn-save']"
+    },
+    # Scheduler toolbar: Facility/Hormone Center dropdown
+    "facility_select": {
+        "container": ".scheduler-toolbar__select-facilities",
+        "button": ".scheduler-toolbar__select-facilities [data-element='dropdown']",
+        "selection_text": ".scheduler-toolbar__select-facilities .composable-select__selection",
+        # Open menu candidates and options
+        "listbox": "[role='listbox']",
+        "options": "[role='option'], .composable-select__option"
+    },
+    # Scheduler tabs (agenda/appointments view)
+    "schedule_tabs": {
+        "appointments": "[data-element='scheduler-tab-0']"
     }
 }

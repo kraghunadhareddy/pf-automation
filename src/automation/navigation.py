@@ -986,16 +986,21 @@ def select_relative_date_in_datepicker(driver: WebDriver, offset_days: int = -1,
                     target.click()
                 except Exception:
                     driver.execute_script("arguments[0].click();", target)
-                _wait_for_data_load(driver, timeout=15)
-                time.sleep(0.1)
+                # Minimal throttle to avoid flooding UI; we'll wait after the batch
+                time.sleep(0.03)
             except StaleElementReferenceException as se:
                 last_err = se
-                time.sleep(0.1)
+                time.sleep(0.05)
                 continue
             except Exception as e:
                 last_err = e
                 LOGGER.debug("Step %s/%s: error clicking %s-day button", i + 1, steps, direction, exc_info=True)
-                time.sleep(0.2)
+                time.sleep(0.05)
+        # Single consolidated wait after all clicks
+        try:
+            _wait_for_data_load(driver, timeout=timeout)
+        except Exception:
+            pass
         if last_err:
             LOGGER.debug("Date shift completed with last error: %s", repr(last_err))
         LOGGER.info("Date shift complete | offset=%s | attempted steps=%s", offset_days, steps)
@@ -1005,7 +1010,50 @@ def select_relative_date_in_datepicker(driver: WebDriver, offset_days: int = -1,
         LOGGER.debug("Error while shifting date by offset.", exc_info=True)
 
 
-def print_patient_links_from_table(driver: WebDriver, timeout: int = 15) -> list[str]:
+def click_appointments_tab(driver: WebDriver, timeout: int = 8) -> None:
+    """Ensure the 'Appointments' tab is active on the scheduler before date selection.
+
+    Targets UI_SELECTORS['schedule_tabs']['appointments'] (data-element='scheduler-tab-0').
+    If already active, no action is taken. Otherwise, clicks the tab and waits briefly for idle.
+    """
+    try:
+        from automation.ui_selectors import UI_SELECTORS
+        sel = (UI_SELECTORS.get("schedule_tabs") or {}).get("appointments")
+        if not sel:
+            return
+        el = WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.CSS_SELECTOR, sel)))
+        try:
+            cls = (el.get_attribute("class") or "").lower()
+            if "active" in cls:
+                LOGGER.info("Scheduler tab 'Appointments' already active.")
+                return
+        except Exception:
+            pass
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+        except Exception:
+            pass
+        try:
+            el.click()
+        except Exception:
+            try:
+                driver.execute_script("arguments[0].click();", el)
+            except Exception:
+                LOGGER.debug("Failed to click Appointments tab.", exc_info=True)
+                return
+        # brief idle wait
+        try:
+            _wait_for_data_load(driver, timeout=10)
+        except Exception:
+            pass
+        LOGGER.info("Scheduler tab 'Appointments' clicked.")
+    except TimeoutException:
+        LOGGER.info("Appointments tab not found; continuing without switching.")
+    except Exception:
+        LOGGER.debug("Error while ensuring Appointments tab.", exc_info=True)
+
+
+def print_patient_links_from_table(driver: WebDriver, timeout: int = 6) -> list[str]:
     from urllib.parse import urlparse, unquote
     """Collect links that match required pattern after date change and return them.
 
@@ -1102,15 +1150,29 @@ def _to_timeline_url_with_view(href: str, view: str) -> str:
         return href.replace("/summary", f"/timeline/{view}")
     return href
 
-def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offset_days: int = -1, staging_dir: Optional[Path] = None) -> None:
-    # Always attempt to click the 'Schedule' item once we believe we're logged in
-    click_schedule(driver)
+def navigate_after_login(
+    driver: WebDriver,
+    url: Optional[str] = None,
+    date_offset_days: int = -1,
+    staging_dir: Optional[Path] = None,
+    skip_click_schedule: bool = False,
+    skip_tabs_and_date: bool = False,
+) -> None:
+    # Always attempt to click the 'Schedule' item once we believe we're logged in (unless already on it)
+    if not skip_click_schedule:
+        click_schedule(driver)
 
-    # After Schedule loads, ensure the Filter toggle is checked
-    ensure_filter_button_checked(driver)
-
-    # After Schedule loads, shift the date using the adjacent prev/next buttons
-    select_relative_date_in_datepicker(driver, offset_days=date_offset_days)
+    # Ensure the Appointments tab and date as requested
+    if not skip_tabs_and_date:
+        # Appointments tab first per requested sequence
+        click_appointments_tab(driver)
+        # Toggle filter if needed
+        ensure_filter_button_checked(driver)
+        # Shift date when applicable
+        select_relative_date_in_datepicker(driver, offset_days=date_offset_days)
+    else:
+        # Even if skipping tabs/date, ensure filter is on for consistent results
+        ensure_filter_button_checked(driver)
 
     # After date change, collect patient chart links and print them
     links = print_patient_links_from_table(driver)
@@ -1268,6 +1330,463 @@ def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offs
                 for file in staging_dir.glob(f"{patient_id}*"):
                     if file.is_file():
                         shutil.move(str(file), str(processed_dir / file.name))
+
+
+# --- Facility (Hormone Center) helpers ---
+def _open_facility_dropdown(driver: WebDriver, timeout: int = 10) -> bool:
+    """Open the scheduler toolbar's facility dropdown with multiple strategies and verify it opened.
+
+    Success criteria:
+      - Visible options found, or
+      - The trigger element reports aria-expanded=true, or
+      - The container has an 'open' class (e.g., composable-select--open, is-open)
+    """
+    try:
+        from automation.ui_selectors import UI_SELECTORS
+        sel = UI_SELECTORS.get("facility_select", {})
+        btn_css = sel.get("button")
+        container_css = sel.get("container")
+        selection_text_css = sel.get("selection_text")
+        if not btn_css:
+            return False
+
+        # Helper to validate menu visibility by checking for any displayed option
+        def _options_visible(short_wait: int = 2) -> bool:
+            try:
+                # Use a short poll for options to appear
+                end = time.time() + short_wait
+                while time.time() < end:
+                    opts = _list_facility_options(driver, timeout=1)
+                    if opts:
+                        return True
+                return False
+            except Exception:
+                return False
+
+        def _is_open_state(btn_el: WebElement | None, container_el: WebElement | None) -> bool:
+            try:
+                if btn_el is not None:
+                    expanded = (btn_el.get_attribute("aria-expanded") or "").lower()
+                    if expanded == "true":
+                        return True
+            except Exception:
+                pass
+            try:
+                if container_el is not None:
+                    cls = (container_el.get_attribute("class") or "").lower()
+                    if any(tok in cls for tok in ("is-open", "open", "composable-select--open")):
+                        return True
+            except Exception:
+                pass
+            return False
+
+        # Locate container and candidate trigger elements
+        cont = None
+        try:
+            if container_css:
+                cont = WebDriverWait(driver, min(timeout, 4)).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, container_css))
+                )
+        except Exception:
+            cont = None
+        # Build a set of trigger candidates (primary first, then fallbacks inside container)
+        trigger_candidates: list[WebElement] = []
+        btn = None
+        try:
+            btn = WebDriverWait(driver, min(timeout, 4)).until(EC.presence_of_element_located((By.CSS_SELECTOR, btn_css)))
+            trigger_candidates.append(btn)
+        except Exception:
+            btn = None
+        # Fallbacks commonly used by composable/select UIs
+        fallback_selectors = [
+            ".composable-select__control",
+            "[role='combobox']",
+            ".composable-select",
+            "[data-element='dropdown-trigger']",
+        ]
+        for css in fallback_selectors:
+            try:
+                scope = cont if cont is not None else driver
+                els = scope.find_elements(By.CSS_SELECTOR, css)
+                for e in els:
+                    if e not in trigger_candidates:
+                        trigger_candidates.append(e)
+            except Exception:
+                continue
+        # Ensure we have at least the container itself as last resort
+        if cont is not None and cont not in trigger_candidates:
+            trigger_candidates.append(cont)
+
+        # Scroll first candidate into view
+        if trigger_candidates:
+            try:
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", trigger_candidates[0])
+            except Exception:
+                pass
+
+        # Attempt 1: regular click on first candidate
+        try:
+            if btn is not None:
+                WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.CSS_SELECTOR, btn_css)))
+        except Exception:
+            pass
+        try:
+            (btn or trigger_candidates[0]).click()
+        except Exception:
+            try:
+                driver.execute_script("arguments[0].click();", (btn or trigger_candidates[0]))
+            except Exception:
+                pass
+        if _options_visible(2) or _is_open_state(btn, cont):
+            LOGGER.info("Facilities dropdown opened via click.")
+            return True
+
+        # Attempt 2: focus + SPACE
+        try:
+            (btn or trigger_candidates[0]).send_keys(Keys.SPACE)
+        except Exception:
+            pass
+        if _options_visible(1) or _is_open_state(btn, cont):
+            LOGGER.info("Facilities dropdown opened via SPACE on button.")
+            return True
+
+        # Attempt 3: focus + ENTER
+        try:
+            (btn or trigger_candidates[0]).send_keys(Keys.ENTER)
+        except Exception:
+            pass
+        if _options_visible(1) or _is_open_state(btn, cont):
+            LOGGER.info("Facilities dropdown opened via ENTER on button.")
+            return True
+
+        # Attempt 3b: ARROW_DOWN often opens listboxes
+        try:
+            (btn or trigger_candidates[0]).send_keys(Keys.ARROW_DOWN)
+        except Exception:
+            pass
+        if _options_visible(1) or _is_open_state(btn, cont):
+            LOGGER.info("Facilities dropdown opened via ARROW_DOWN on button.")
+            return True
+
+        # Attempt 4: click selection text element
+        if selection_text_css:
+            try:
+                sel_el = driver.find_element(By.CSS_SELECTOR, selection_text_css)
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", sel_el)
+                except Exception:
+                    pass
+                try:
+                    sel_el.click()
+                except Exception:
+                    driver.execute_script("arguments[0].click();", sel_el)
+                if _options_visible(1) or _is_open_state(btn, cont):
+                    LOGGER.info("Facilities dropdown opened via selection text click.")
+                    return True
+            except Exception:
+                pass
+
+        # Attempt 5: iterate other trigger candidates and try clicking each
+        for cand in trigger_candidates[1:]:
+            try:
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", cand)
+                except Exception:
+                    pass
+                try:
+                    cand.click()
+                except Exception:
+                    driver.execute_script("arguments[0].click();", cand)
+                if _options_visible(1) or _is_open_state(btn, cont):
+                    LOGGER.info("Facilities dropdown opened via fallback trigger.")
+                    return True
+            except Exception:
+                continue
+
+        # Dump minimal element diagnostics to aid selector fixes
+        try:
+            btn_html = (btn.get_attribute("outerHTML") or "")[:1000]
+        except Exception:
+            btn_html = "(error)"
+        try:
+            cont_html = (cont.get_attribute("outerHTML") or "")[:1000] if cont else "(none)"
+        except Exception:
+            cont_html = "(error)"
+        try:
+            btn_expanded = (btn.get_attribute("aria-expanded") if btn else None)
+        except Exception:
+            btn_expanded = None
+        try:
+            cont_class = (cont.get_attribute("class") if cont else None)
+        except Exception:
+            cont_class = None
+        LOGGER.info(
+            "Facilities dropdown did not open. candidates=%s | btn aria-expanded=%s | container class=%s",
+            len(trigger_candidates), btn_expanded, cont_class,
+        )
+        LOGGER.debug("Facilities btn HTML: %s", btn_html)
+        LOGGER.debug("Facilities container HTML: %s", cont_html)
+        LOGGER.debug("Facilities dropdown did not open with available strategies.")
+        return False
+    except Exception:
+        LOGGER.debug("Failed to open facility dropdown.", exc_info=True)
+        return False
+
+
+def _list_facility_options(driver: WebDriver, timeout: int = 10) -> list[WebElement]:
+    """Return visible option elements for the open facility dropdown.
+
+    This is tolerant of portals: it scans the whole DOM for option-like elements
+    and doesn't strictly require a visible listbox container first.
+    """
+    opts: list[WebElement] = []
+    try:
+        from automation.ui_selectors import UI_SELECTORS
+        selectors = UI_SELECTORS.get("facility_select", {})
+        listbox_css = selectors.get("listbox", "[role='listbox']")
+        options_css = selectors.get("options", "[role='option'], .composable-select__option")
+
+        # First try: directly scan for option elements (handles body-level portals)
+        try:
+            candidates = driver.find_elements(By.CSS_SELECTOR, options_css)
+            for el in candidates:
+                try:
+                    if el.is_displayed():
+                        opts.append(el)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        # If none found, wait briefly for a listbox and try again
+        if not opts:
+            try:
+                WebDriverWait(driver, timeout).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, listbox_css))
+                )
+                candidates = driver.find_elements(By.CSS_SELECTOR, options_css)
+                for el in candidates:
+                    try:
+                        if el.is_displayed():
+                            opts.append(el)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+    except Exception:
+        LOGGER.debug("No facility options found (dropdown may not have opened).", exc_info=True)
+    return opts
+
+
+def _get_current_facility_text(driver: WebDriver) -> str:
+    try:
+        from automation.ui_selectors import UI_SELECTORS
+        sel_css = UI_SELECTORS.get("facility_select", {}).get("selection_text")
+        if not sel_css:
+            return ""
+        el = driver.find_element(By.CSS_SELECTOR, sel_css)
+        return (el.text or "").strip()
+    except Exception:
+        return ""
+
+
+def _select_facility_by_text(driver: WebDriver, label_text: str, timeout: int = 10) -> bool:
+    """Open facility dropdown and select the option that matches the label text (case-insensitive contains).
+
+    Returns True on selection success. Logs available options when selection fails.
+    """
+    target_text_norm = (label_text or "").strip().lower()
+    if not target_text_norm:
+        return False
+
+    # Try opening quickly up to three times with short timeouts for responsiveness
+    for attempt in range(1, 4):
+        open_timeout = 3 if attempt == 1 else (4 if attempt == 2 else min(timeout, 6))
+        ok = _open_facility_dropdown(driver, timeout=open_timeout)
+        if not ok:
+            LOGGER.info("Facilities dropdown open failed (attempt %s).", attempt)
+            continue
+        options = _list_facility_options(driver, timeout=timeout)
+        if not options:
+            LOGGER.info("No facility options visible after opening (attempt %s).", attempt)
+            continue
+
+        # Prefer exact match first, then contains
+        target = None
+        target_text_lower = target_text_norm
+        normalized = []
+        for el in options:
+            try:
+                t = (el.text or "").strip()
+                normalized.append(t)
+                if t.lower() == target_text_lower:
+                    target = el
+                    break
+            except Exception:
+                continue
+        if not target:
+            for el in options:
+                try:
+                    t = (el.text or "").strip()
+                    if target_text_norm in t.lower():
+                        target = el
+                        break
+                except Exception:
+                    continue
+        if not target:
+            LOGGER.info("Facility option not found for query='%s'. Available: %s", label_text, normalized)
+            # Try closing by ESC before next attempt
+            try:
+                driver.switch_to.active_element.send_keys(Keys.ESCAPE)
+            except Exception:
+                pass
+            continue
+
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target)
+        except Exception:
+            pass
+        try:
+            target.click()
+        except Exception:
+            try:
+                driver.execute_script("arguments[0].click();", target)
+            except Exception:
+                LOGGER.info("Failed to click facility option '%s'.", label_text)
+                return False
+        # Confirm selection updated (prefer exact equality first)
+        try:
+            WebDriverWait(driver, 4).until(
+                lambda d: (
+                    (_get_current_facility_text(d) or "").strip().lower() == target_text_lower
+                    or target_text_norm in (_get_current_facility_text(d) or "").strip().lower()
+                )
+            )
+            return True
+        except Exception:
+            # Log current selection text and available options for diagnostics
+            try:
+                current_text = _get_current_facility_text(driver)
+            except Exception:
+                current_text = ""
+            LOGGER.info("Facility select did not reflect '%s'. Current='%s'", label_text, current_text)
+            return False
+    return False
+
+
+def _get_available_hormone_centers(driver: WebDriver, timeout: int = 10, keyword: str = "hormone center") -> list[str]:
+    """Return list of visible facility option texts containing the keyword (default: 'hormone center')."""
+    centers: list[str] = []
+    if not _open_facility_dropdown(driver, timeout=timeout):
+        return centers
+    opts = _list_facility_options(driver, timeout=timeout)
+    seen = set()
+    for el in opts:
+        try:
+            t = (el.text or "").strip()
+            if t and keyword.lower() in t.lower():
+                if t not in seen:
+                    centers.append(t)
+                    seen.add(t)
+        except Exception:
+            continue
+    # Attempt to close dropdown by ESC if needed
+    try:
+        driver.switch_to.active_element.send_keys(Keys.ESCAPE)
+    except Exception:
+        pass
+    return centers
+
+
+def run_for_each_hormone_center(driver: WebDriver, date_offset_days: int = -1, staging_dir: Optional[Path] = None) -> None:
+    """Iterate each Hormone Center from the scheduler facilities dropdown and process patients for each.
+
+    Steps per center:
+      - Ensure we're on Schedule
+      - Select the center from dropdown
+      - Wait for data load
+      - Run the usual navigate_after_login flow (skipping the extra schedule click)
+    """
+    # We'll navigate to Schedule per center iteration to ensure toolbar present
+    # Ensure Schedule once upfront so the toolbar is present for the first selection
+    click_schedule(driver)
+    centers = _get_available_hormone_centers(driver, timeout=12, keyword="hormone center")
+    if not centers:
+        LOGGER.info("No Hormone Center options found in facilities dropdown.")
+        return
+    LOGGER.info("Found %s hormone center(s): %s", len(centers), centers)
+    # Step 2: Change the date as required (once for the entire run)
+    select_relative_date_in_datepicker(driver, offset_days=date_offset_days)
+    for idx, label in enumerate(centers, start=1):
+        try:
+            # Ensure Schedule between centers (skip for first to avoid double navigation)
+            if idx > 1:
+                click_schedule(driver)
+            ok = _select_facility_by_text(driver, label, timeout=10)
+            LOGGER.info("Select center [%s/%s]: '%s' -> %s", idx, len(centers), label, "ok" if ok else "fail")
+            if not ok:
+                continue
+            _wait_for_data_load(driver, timeout=20)
+            # Step 4: Click on Appointments
+            click_appointments_tab(driver)
+            # Step 5: Process patients; skip tabs/date inside processing
+            navigate_after_login(
+                driver,
+                date_offset_days=0,
+                staging_dir=staging_dir,
+                skip_click_schedule=True,
+                skip_tabs_and_date=True,
+            )
+        except Exception:
+            LOGGER.debug("Error while processing center '%s'", label, exc_info=True)
+
+
+def run_for_named_hormone_centers(
+    driver: WebDriver,
+    center_names: list[str],
+    date_offset_days: int = -1,
+    staging_dir: Optional[Path] = None,
+) -> None:
+    """Select and process one or more specific Hormone Center names.
+
+    Uses case-insensitive substring match per name. If a name isn't selectable, it logs and moves on.
+    """
+    if not center_names:
+        LOGGER.info("No center names provided; nothing to do.")
+        return
+    # Ensure Schedule once upfront so the toolbar is present for the first selection
+    click_schedule(driver)
+    # Step 2: Change the date as required (once for the entire run)
+    select_relative_date_in_datepicker(driver, offset_days=date_offset_days)
+
+    for idx, name in enumerate(center_names, start=1):
+        try:
+            if not name or not str(name).strip():
+                continue
+            label = str(name).strip()
+            # Ensure toolbar is present between selections (skip first)
+            if idx > 1:
+                click_schedule(driver)
+            ok = _select_facility_by_text(driver, label, timeout=12)
+            LOGGER.info("Select requested center [%s/%s]: '%s' -> %s", idx, len(center_names), label, "ok" if ok else "fail")
+            if not ok:
+                # Optionally, list available centers for debugging
+                avail = _get_available_hormone_centers(driver, timeout=8, keyword="")
+                LOGGER.info("Available facilities at failure: %s", avail)
+                continue
+            _wait_for_data_load(driver, timeout=20)
+            # Step 4: Click on Appointments
+            click_appointments_tab(driver)
+            # Step 5: Process patients; skip tabs/date inside processing
+            navigate_after_login(
+                driver,
+                date_offset_days=0,
+                staging_dir=staging_dir,
+                skip_click_schedule=True,
+                skip_tabs_and_date=True,
+            )
+        except Exception:
+            LOGGER.debug("Error while processing requested center '%s'", name, exc_info=True)
 
 # --- Move generic handler and wrappers to top-level scope ---
 def populate_section_generic(driver, summary_text, section_key, timeout=15, debug_capture=None) -> bool:
