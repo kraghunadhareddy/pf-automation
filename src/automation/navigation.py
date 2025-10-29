@@ -1,4 +1,8 @@
 # --- Preventive Care Summary Helper ---
+from selenium.webdriver.remote.webdriver import WebDriver
+from pathlib import Path
+from datetime import datetime
+from automation.ui_selectors import UI_SELECTORS
 def build_preventive_care_summary(intake_json):
     """
     Extract summary from Preventive Care related sections for female patients only.
@@ -159,11 +163,18 @@ def _build_family_history_summary(intake_json):
     sys.stdout.flush()
     lines = []
     for section in family_sections:
+        # Extract questions/answers
         for q in section.get("questions", []):
             question = q.get("question", "")
             answer = q.get("answer")
             if answer is not None and str(answer).strip():
                 lines.append(f"{question}: {answer}")
+        # Extract ticked checkboxes
+        for cb in section.get("checkboxes", []):
+            label = cb.get("label", "")
+            status = cb.get("status", "")
+            if status.lower() == "ticked":
+                lines.append(f"{label}")
     print(f"[DEBUG] Extracted family history lines: {lines}")
     sys.stdout.flush()
     return "\n".join(lines) if lines else "No family history details available."
@@ -210,11 +221,18 @@ def _build_social_history_summary(intake_json):
     sys.stdout.flush()
     lines = []
     for section in social_sections:
+        # Extract questions/answers
         for q in section.get("questions", []):
             question = q.get("question", "")
             answer = q.get("answer")
             if answer is not None and str(answer).strip():
                 lines.append(f"{question}: {answer}")
+        # Extract ticked checkboxes
+        for cb in section.get("checkboxes", []):
+            label = cb.get("label", "")
+            status = cb.get("status", "")
+            if status.lower() == "ticked":
+                lines.append(f"{label}")
     print(f"[DEBUG] Extracted social history lines: {lines}")
     sys.stdout.flush()
     return "\n".join(lines) if lines else "No social history details available."
@@ -261,91 +279,243 @@ def _build_major_events_summary(intake_json):
     sys.stdout.flush()
     lines = []
     for section in major_sections:
+        # Extract questions/answers
         for q in section.get("questions", []):
             question = q.get("question", "")
             answer = q.get("answer")
             if answer is not None and str(answer).strip():
                 lines.append(f"{question}: {answer}")
+        # Extract ticked checkboxes
+        for cb in section.get("checkboxes", []):
+            label = cb.get("label", "")
+            status = cb.get("status", "")
+            if status.lower() == "ticked":
+                lines.append(f"{label}")
     print(f"[DEBUG] Extracted major events lines: {lines}")
     sys.stdout.flush()
     return "\n".join(lines) if lines else "No major events details available."
 
-def _build_ongoing_medical_problems_summary(intake_json):
-    import sys
+def _build_social_history_summary(intake_json):
+    """Aggregate Social History across Tobacco/Alcohol/Caffeine/Exercise sections and responses.
+
+    Derives Yes/No from ticked checkboxes per category (treat "None"/"None/ NA" as No; any other ticked as Yes),
+    and pulls metrics from responses (Packs/Day, Drinks/Week, Cups/Day, Days/Week). Also includes Children and
+    Occupation when available.
+    """
+    import json, logging
     from pathlib import Path
-    import json
-    print(f"[DEBUG] intake_json type: {type(intake_json)}, value: {intake_json}")
-    sys.stdout.flush()
+    logger = logging.getLogger(__name__)
+    # Load JSON from Path/str/dict
     try:
-        if isinstance(intake_json, str) or isinstance(intake_json, Path):
+        if isinstance(intake_json, (str, Path)):
             with open(intake_json, "r", encoding="utf-8") as f:
                 data = json.load(f)
         else:
             data = intake_json
-    except Exception as e:
-        print(f"[DEBUG] Error loading intake_json: {e}")
-        sys.stdout.flush()
-        return "No ongoing medical problems found."
-
-    section_names = []
-    for page in data.get("pages", []):
-        for section in page.get("sections", []):
-            section_names.append(section.get("section", "<no section key>"))
-        for resp in page.get("responses", []):
-            section_names.append(resp.get("section", "<no section key>"))
-    print(f"[DEBUG] All section names found: {section_names}")
-    sys.stdout.flush()
-
-    ongoing_sections = []
-    for page in data.get("pages", []):
-        for section in page.get("sections", []):
-            if section.get("section", "").strip().upper() == "REASON FOR VISIT/ONGOING MEDICAL PROBLEMS":
-                ongoing_sections.append(section)
-        for resp in page.get("responses", []):
-            if resp.get("section", "").strip().upper() == "REASON FOR VISIT/ONGOING MEDICAL PROBLEMS":
-                ongoing_sections.append(resp)
-
-    if not ongoing_sections:
-        return "No ongoing medical problems found."
-
-    print(f"[DEBUG] Raw ongoing_sections: {ongoing_sections}")
-    sys.stdout.flush()
-    lines = []
-    for section in ongoing_sections:
-        for q in section.get("questions", []):
-            question = q.get("question", "")
-            answer = q.get("answer")
-            if answer is not None and str(answer).strip():
-                lines.append(f"{question}: {answer}")
-    print(f"[DEBUG] Extracted ongoing medical problems lines: {lines}")
-    sys.stdout.flush()
-    return "\n".join(lines) if lines else "No ongoing medical problems details available."
-from selenium.webdriver.remote.webdriver import WebDriver
-from pathlib import Path
-from automation.ui_selectors import UI_SELECTORS
-from datetime import datetime
-def _build_nutrition_history_summary(intake_json: Path) -> str:
-    """Summarize supplements from the Nutrition History section."""
-    import json
-    try:
-        data = json.loads(intake_json.read_text(encoding="utf-8", errors="ignore") or "{}")
     except Exception:
         return ""
 
     pages = data.get("pages") or []
-    supplements = []
+    # Categories scaffold
+    categories = {
+        "Tobacco": {"yes": None, "answers": {}, "explicit": None, "answered_questions": 0},
+        "Alcohol": {"yes": None, "answers": {}, "explicit": None, "answered_questions": 0},
+        "Caffeine": {"yes": None, "answers": {}, "explicit": None, "answered_questions": 0},
+        "Exercise": {"yes": None, "answers": {}, "explicit": None, "answered_questions": 0},
+    }
+    occupation_answer = ""
+    children_answer = ""
+    children_checkbox_ticked = False
+
+    def norm(name: str) -> str:
+        return (name or "").strip().lower()
+
+    def looks_like_none(label: str) -> bool:
+        l = (label or "").strip().lower()
+        return l in {"none", "none/ na", "none/na", "no", "n/a"}
+
+    # Pass 1: sections with checkboxes determine explicit yes/no
     for page in pages:
+        if not isinstance(page, dict):
+            continue
         for section in page.get("sections", []) or []:
-            sec_name = (section.get("section") or "").strip().lower()
-            if "supplements" in sec_name or "please list all current supplements" in sec_name:
+            if not isinstance(section, dict):
+                continue
+            sec = norm(section.get("section"))
+            if sec in {"tobacco", "alcohol", "caffeine", "exercise"}:
+                sec_key = sec.capitalize()
+                any_non_none_ticked = False
+                any_no_ticked = False
+                any_yes_ticked = False
                 for cb in section.get("checkboxes", []) or []:
+                    if not isinstance(cb, dict):
+                        continue
+                    label = (cb.get("label") or "").strip()
+                    status = (cb.get("status") or "").lower()
+                    if status != "ticked":
+                        continue
+                    l = label.lower()
+                    if l == "yes":
+                        any_yes_ticked = True
+                    elif l == "no" or looks_like_none(label):
+                        any_no_ticked = True
+                    else:
+                        any_non_none_ticked = True
+                # Priority: explicit Yes/No over other non-none ticks
+                if any_yes_ticked:
+                    categories[sec_key]["yes"] = True
+                    categories[sec_key]["explicit"] = True
+                elif any_no_ticked:
+                    categories[sec_key]["yes"] = False
+                    categories[sec_key]["explicit"] = False
+                elif any_non_none_ticked:
+                    categories[sec_key]["yes"] = True
+                    categories[sec_key]["explicit"] = True
+
+    # Pass 2: responses for metrics and additional signals
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        for resp in page.get("responses", []) or []:
+            if not isinstance(resp, dict):
+                continue
+            rsec = norm(resp.get("section"))
+            for q in resp.get("questions", []) or []:
+                if not isinstance(q, dict):
+                    continue
+                qtext = (q.get("question") or "").strip()
+                sval = str(q.get("answer") or "").strip()
+                if not sval:
+                    continue
+                lower_q = qtext.lower()
+                # map section to category
+                sec_key = None
+                for k in categories.keys():
+                    if rsec == k.lower():
+                        sec_key = k
+                        break
+                if sec_key:
+                    categories[sec_key]["answered_questions"] += 1
+                    if sec_key == "Tobacco" and "packs/day" in lower_q and "Packs/Day" not in categories[sec_key]["answers"]:
+                        categories[sec_key]["answers"]["Packs/Day"] = sval
+                    elif sec_key == "Alcohol" and "drinks/week" in lower_q and "Drinks/Week" not in categories[sec_key]["answers"]:
+                        categories[sec_key]["answers"]["Drinks/Week"] = sval
+                    elif sec_key == "Caffeine" and "cups/day" in lower_q and "Cups/Day" not in categories[sec_key]["answers"]:
+                        categories[sec_key]["answers"]["Cups/Day"] = sval
+                    elif sec_key == "Exercise" and "days/week" in lower_q and "Days/Week" not in categories[sec_key]["answers"]:
+                        categories[sec_key]["answers"]["Days/Week"] = sval
+                    # an answered metric implies participation unless explicit No was set
+                    if categories[sec_key]["explicit"] is None:
+                        categories[sec_key]["yes"] = True
+                # Regardless of section, capture these specifics
+                if "occupation" in lower_q and not occupation_answer:
+                    occupation_answer = sval
+                if ("# of children" in lower_q or ("please" in lower_q and "children" in lower_q)) and not children_answer:
+                    children_answer = sval
+
+    # If category had answered questions but no explicit checkbox, treat as Yes
+    for cat, info in categories.items():
+        if info["explicit"] is None and info["answered_questions"] > 0 and info["yes"] is None:
+            info["yes"] = True
+
+    # Compose lines in fixed order
+    lines = []
+    for cat in ["Tobacco", "Alcohol", "Caffeine", "Exercise"]:
+        info = categories[cat]
+        if info["yes"] is None:
+            # default to No if nothing was indicated
+            info["yes"] = False
+        status = "Yes" if info["yes"] else "No"
+        parts = []
+        for mk in ["Packs/Day", "Drinks/Week", "Cups/Day", "Days/Week"]:
+            if mk in info["answers"]:
+                parts.append(f"{mk}: {info['answers'][mk]}")
+        if parts:
+            lines.append(f"{cat}: {status} ({'; '.join(parts)})")
+        else:
+            lines.append(f"{cat}: {status}")
+    if children_answer:
+        lines.append(f"Children: {children_answer}")
+    if occupation_answer:
+        lines.append(f"Occupation: {occupation_answer}")
+    return "\n".join(lines).strip()
+
+def _build_nutrition_history_summary(intake_json: Path) -> str:
+    """Summarize Nutrition History from intake JSON.
+
+    Combines Q/A pairs from Nutrition-related sections/responses and any ticked checkbox labels
+    (including Supplements) into a single multi-line summary.
+    Accepts a Path to the JSON file or an already-loaded dict/str path.
+    """
+    # Load JSON flexibly (Path, str path, or dict)
+    try:
+        if isinstance(intake_json, (str, Path)):
+            p = Path(intake_json)
+            data = json.loads(p.read_text(encoding="utf-8", errors="ignore") or "{}")
+        else:
+            data = intake_json
+    except Exception:
+        return ""
+
+    pages = data.get("pages") or []
+    qa_lines: list[str] = []
+    ticked: list[str] = []
+
+    def is_nutrition_section(name: str) -> bool:
+        n = (name or "").strip().lower()
+        return (
+            "nutrition" in n
+            or "nutrition history" in n
+            or "diet" in n
+            or "supplement" in n
+        )
+
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        # Sections: collect ticked + possible embedded Q/A
+        for section in page.get("sections", []) or []:
+            if not isinstance(section, dict):
+                continue
+            sec_name = section.get("section") or ""
+            if is_nutrition_section(sec_name):
+                # Tick boxes
+                for cb in section.get("checkboxes", []) or []:
+                    if not isinstance(cb, dict):
+                        continue
                     label = (cb.get("label") or "").strip()
                     status = (cb.get("status") or "").lower()
                     if status == "ticked" and label:
-                        supplements.append(label)
-    if supplements:
-        return "Supplements: " + ", ".join(supplements)
-    return ""
+                        ticked.append(label)
+                # Embedded questions (rare)
+                for q in section.get("questions", []) or []:
+                    if not isinstance(q, dict):
+                        continue
+                    qtext = (q.get("question") or "").strip()
+                    ans = q.get("answer")
+                    if ans is None or str(ans).strip() == "":
+                        continue
+                    qa_lines.append(f"{qtext}: {str(ans).strip()}")
+        # Responses: primary Q/A live here
+        for resp in page.get("responses", []) or []:
+            if not isinstance(resp, dict):
+                continue
+            rsec = resp.get("section") or ""
+            if is_nutrition_section(rsec):
+                for q in resp.get("questions", []) or []:
+                    if not isinstance(q, dict):
+                        continue
+                    qtext = (q.get("question") or "").strip()
+                    ans = q.get("answer")
+                    if ans is None or str(ans).strip() == "":
+                        continue
+                    qa_lines.append(f"{qtext}: {str(ans).strip()}")
+
+    lines: list[str] = []
+    if ticked:
+        lines.append("Ticked: " + ", ".join(ticked))
+    lines.extend(qa_lines)
+    return "\n".join(lines).strip()
 
 def _populate_nutrition_history(driver, summary_text, timeout=15) -> bool:
     """Open nutrition history editor, populate textarea, and save."""
@@ -418,17 +588,18 @@ def _build_major_events_summary(intake_json: Path) -> str:
         for section in page.get("sections", []) or []:
             if not isinstance(section, dict):
                 continue
-            sec_name = (section.get("section") or "").strip().lower()
-            if sec_name == "surgeries/major events":
+            sec_name = (section.get("section") or "").strip().lower().replace("/", "").replace(" ", "")
+            if sec_name == "surgeriesmajorevents":
                 for cb in section.get("checkboxes", []) or []:
                     label = (cb.get("label") or "").strip()
-                    if cb.get("checked") and label:
+                    status = (cb.get("status") or "").lower()
+                    if status == "ticked" and label:
                         ticked_labels.append(label)
         for resp in page.get("responses", []) or []:
             if not isinstance(resp, dict):
                 continue
-            rsec = (resp.get("section") or "").strip().lower()
-            if rsec == "surgeries/major events":
+            rsec = (resp.get("section") or "").strip().lower().replace("/", "").replace(" ", "")
+            if rsec == "surgeriesmajorevents":
                 for q in resp.get("questions", []) or []:
                     qtext = (q.get("question") or "").strip()
                     ans = (q.get("answer") or "").strip()
@@ -1089,6 +1260,15 @@ def navigate_after_login(driver: WebDriver, url: Optional[str] = None, date_offs
 
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [END] End patient loop idx={idx}, patient_id={patient_id}")
 
+            # Move all files for this patient from staging to processed using patient id wildcard
+            import shutil
+            if staging_dir and patient_id:
+                processed_dir = staging_dir.parent / "processed"
+                processed_dir.mkdir(exist_ok=True)
+                for file in staging_dir.glob(f"{patient_id}*"):
+                    if file.is_file():
+                        shutil.move(str(file), str(processed_dir / file.name))
+
 # --- Move generic handler and wrappers to top-level scope ---
 def populate_section_generic(driver, summary_text, section_key, timeout=15, debug_capture=None) -> bool:
     """
@@ -1357,10 +1537,15 @@ def _download_intake_document_if_available(driver: WebDriver, timeout: int = 15,
         btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-element='download-doc-btn']")))
     except TimeoutException:
         return None
-    # Clean Downloads of old intake*.pdf files before triggering a new download
+    # Clean Downloads of old intake*.pdf files (case insensitive) before triggering a new download
     downloads_dir = _get_downloads_dir()
     try:
-        _cleanup_old_intake_pdfs(downloads_dir)
+        for p in downloads_dir.glob("*.pdf"):
+            if "intake" in p.name.lower():
+                try:
+                    p.unlink(missing_ok=True)
+                except Exception:
+                    continue
     except Exception:
         LOGGER.debug("Failed to clean up old intake PDFs in Downloads.", exc_info=True)
     try:
@@ -1413,13 +1598,14 @@ def _wait_for_intake_pdf(downloads_dir: Path, max_wait: int = 40) -> Optional[Pa
     end = time.time() + max_wait
     candidate: Optional[Path] = None
     while time.time() < end:
-        pdfs = [p for p in downloads_dir.glob("*.pdf") if p.name.lower().startswith("intake")]
+        pdfs = [p for p in downloads_dir.glob("*.pdf")
+                if "intake" in p.name.lower() and not p.name.endswith(".crdownload")]
         if pdfs:
-            # Ensure no .crdownload temp for this file
-            candidate = sorted(pdfs, key=lambda x: x.stat().st_mtime, reverse=True)[0]
-            crdl = candidate.with_suffix(candidate.suffix + ".crdownload")
+            # Select the most recently modified file
+            latest_pdf = max(pdfs, key=lambda p: p.stat().st_mtime)
+            crdl = latest_pdf.with_suffix(latest_pdf.suffix + ".crdownload")
             if not crdl.exists():
-                return candidate
+                return latest_pdf
         time.sleep(0.5)
     return candidate
 
@@ -1488,169 +1674,6 @@ def _dismiss_any_popups(driver: WebDriver, timeout: int = 5) -> int:
     dismissed = 0
     return dismissed
     return True
-
-
-def _build_social_history_summary(intake_json: Path) -> str:
-    """Build social history summary with required fields.
-
-    Fixed ordered categories:
-      Tobacco
-      Alcohol
-      Caffeine
-      Exercise
-    Then (conditionally):
-      Children (only if '# of Children' checkbox is ticked AND a corresponding answer exists)
-      Occupation (only if a non-empty answer exists)
-
-    Formatting:
-      <Category>: Yes|No (Metric: value; Metric2: value ...)
-      Children: <value>
-      Occupation: <value>
-    """
-    import logging
-    logger = logging.getLogger(__name__)
-    try:
-        data = json.loads(intake_json.read_text(encoding="utf-8", errors="ignore") or "{}")
-    except Exception:
-        logger.debug(f"[SocialHistory] Failed to read or parse {intake_json}")
-        return ""
-
-    pages = data.get("pages") or []
-    categories = {
-        "Tobacco": {"yes": False, "answers": {}, "explicit": None, "answered_questions": 0},
-        "Alcohol": {"yes": False, "answers": {}, "explicit": None, "answered_questions": 0},
-        "Caffeine": {"yes": False, "answers": {}, "explicit": None, "answered_questions": 0},
-        "Exercise": {"yes": False, "answers": {}, "explicit": None, "answered_questions": 0},
-    }
-
-    def _is_yes_label(lbl: str) -> bool:
-        l = lbl.lower().strip()
-        return l == "yes" or l.startswith("yes") or (l.startswith("y") and len(l) <= 3)
-
-    def _is_no_label(lbl: str) -> bool:
-        l = lbl.lower().strip()
-        return l == "no" or l.startswith("no") or (l.startswith("n") and len(l) <= 3)
-    children_checkbox_ticked = False
-    children_answer: str | None = None
-    occupation_answer: str | None = None
-    logger.debug(f"[SocialHistory] Starting extraction for {intake_json}")
-
-    # Pass 1: sections (checkbox states)
-    for page in pages:
-        if not isinstance(page, dict):
-            continue
-        sections = page.get("sections", []) or []
-        for section in sections:
-            if not isinstance(section, dict):
-                continue
-            sec_name = (section.get("section") or "").strip()
-            if not sec_name:
-                continue
-            sec_key = None
-            for k in categories.keys():
-                if sec_name.lower() == k.lower():
-                    sec_key = k
-                    break
-            if sec_key:
-                cbox_list = section.get("checkboxes", []) or []
-                for cb in cbox_list:
-                    if not isinstance(cb, dict):
-                        continue
-                    label_raw = (cb.get("label") or "").strip()
-                    status = (cb.get("status") or "").lower()
-                    if _is_yes_label(label_raw) and status == "ticked":
-                        categories[sec_key]["yes"] = True
-                        categories[sec_key]["explicit"] = True
-                        logger.debug(f"[SocialHistory] {sec_key} checkbox YES detected: {cb}")
-                    elif _is_no_label(label_raw) and status == "ticked" and not categories[sec_key]["yes"]:
-                        categories[sec_key]["yes"] = False
-                        categories[sec_key]["explicit"] = False
-                        logger.debug(f"[SocialHistory] {sec_key} checkbox NO detected: {cb}")
-                    if label_raw == "# of Children" and status == "ticked":
-                        children_checkbox_ticked = True
-
-    # Pass 2: responses (quantitative answers)
-    for page in pages:
-        if not isinstance(page, dict):
-            continue
-        responses = page.get("responses", []) or []
-        for resp in responses:
-            if not isinstance(resp, dict):
-                continue
-            rsec = (resp.get("section") or "").strip()
-            questions = resp.get("questions", []) or []
-            for q in questions:
-                if not isinstance(q, dict):
-                    continue
-                qtext = (q.get("question") or "").strip()
-                ans = q.get("answer")
-                if ans is None:
-                    continue
-                sval = str(ans).strip()
-                if not sval:
-                    continue
-                lower_q = qtext.lower()
-                sec_key_r = None
-                for k in categories.keys():
-                    if rsec.lower() == k.lower():
-                        sec_key_r = k
-                        break
-                if sec_key_r:
-                    if sec_key_r == "Tobacco" and "packs/day" in lower_q and "Packs/Day" not in categories[sec_key_r]["answers"]:
-                        categories[sec_key_r]["answers"]["Packs/Day"] = sval
-                        logger.debug(f"[SocialHistory] Tobacco Packs/Day: {sval}")
-                    elif sec_key_r == "Alcohol" and "drinks/week" in lower_q and "Drinks/Week" not in categories[sec_key_r]["answers"]:
-                        categories[sec_key_r]["answers"]["Drinks/Week"] = sval
-                        logger.debug(f"[SocialHistory] Alcohol Drinks/Week: {sval}")
-                    elif sec_key_r == "Caffeine" and "cups/day" in lower_q and "Cups/Day" not in categories[sec_key_r]["answers"]:
-                        categories[sec_key_r]["answers"]["Cups/Day"] = sval
-                        logger.debug(f"[SocialHistory] Caffeine Cups/Day: {sval}")
-                    elif sec_key_r == "Exercise":
-                        if "days/week" in lower_q and "Days/Week" not in categories[sec_key_r]["answers"]:
-                            categories[sec_key_r]["answers"]["Days/Week"] = sval
-                            logger.debug(f"[SocialHistory] Exercise Days/Week: {sval}")
-                        elif "occupation" in lower_q and not occupation_answer:
-                            occupation_answer = sval
-                            logger.debug(f"[SocialHistory] Occupation: {sval}")
-                        elif ("# of children" in lower_q or ("please" in lower_q and "children" in lower_q)) and not children_answer:
-                            children_answer = sval
-                            logger.debug(f"[SocialHistory] Children: {sval}")
-                    categories[sec_key_r]["answered_questions"] += 1
-                else:
-                    if "occupation" in lower_q and not occupation_answer:
-                        occupation_answer = sval
-                        logger.debug(f"[SocialHistory] Occupation: {sval}")
-                    if ("# of children" in lower_q or ("please" in lower_q and "children" in lower_q)) and not children_answer:
-                        children_answer = sval
-                        logger.debug(f"[SocialHistory] Children: {sval}")
-
-    # Inference: if a category has answered questions but no explicit checkbox state, treat as Yes
-    for cat, info in categories.items():
-        if info["explicit"] is None and info["answered_questions"] > 0:
-            info["yes"] = True
-            logger.debug(f"[SocialHistory] Inference | category={cat} | inferred=yes | answered_questions={info['answered_questions']}")
-
-    lines: list[str] = []
-    for cat in ["Tobacco", "Alcohol", "Caffeine", "Exercise"]:
-        info = categories[cat]
-        status = "Yes" if info["yes"] else "No"
-        parts: list[str] = []
-        if info["yes"]:
-            for metric_key in ["Packs/Day", "Drinks/Week", "Cups/Day", "Days/Week"]:
-                if metric_key in info["answers"]:
-                    parts.append(f"{metric_key}: {info['answers'][metric_key]}")
-        if parts:
-            lines.append(f"{cat}: {status} ({'; '.join(parts)})")
-        else:
-            lines.append(f"{cat}: {status}")
-    if children_checkbox_ticked and children_answer:
-        lines.append(f"Children: {children_answer}")
-        logger.debug(f"[SocialHistory] Children summary line: {children_answer}")
-    if occupation_answer:
-        lines.append(f"Occupation: {occupation_answer}")
-        logger.debug(f"[SocialHistory] Occupation summary line: {occupation_answer}")
-    logger.debug(f"[SocialHistory] Summary for {intake_json}: {lines}")
-    return "\n".join(lines)
 
 
 def _populate_social_history(driver: WebDriver, summary_text: str, timeout: int = 15) -> bool:
